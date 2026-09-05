@@ -154,20 +154,50 @@ pub fn evaluate_rarity(nn_dist: f64, mc_dev_db: Option<f64>, desc: &BehaviorDesc
     Rarity::Common
 }
 
-pub struct ArchiveItemView<'a> {
+/// Resolve the uv executable path from environment or default PATH
+pub fn get_uv_cmd() -> String {
+    if let Ok(p) = std::env::var("UV_PATH") {
+        if !p.trim().is_empty() {
+            return p.trim().to_string();
+        }
+    }
+    if let Ok(p) = std::env::var("IMBIK_UV") {
+        if !p.trim().is_empty() {
+            return p.trim().to_string();
+        }
+    }
+    "uv".to_string()
+}
+
+/// Evaluate circuit rarity with hardware verification awareness
+pub fn evaluate_rarity_with_hw(
+    nn_dist: f64,
+    mc_dev_db: Option<f64>,
+    descriptor: &BehaviorDescriptor,
+    is_hardware_verified: bool,
+) -> Rarity {
+    if is_hardware_verified {
+        return Rarity::Legendary;
+    }
+    evaluate_rarity(nn_dist, mc_dev_db, descriptor)
+}
+
+#[derive(Clone)]
+pub struct ArchiveItemView {
     pub id: usize,
-    pub circuit: &'a Circuit,
-    pub descriptor: &'a BehaviorDescriptor,
+    pub circuit: Circuit,
+    pub descriptor: BehaviorDescriptor,
     pub nn_dist: f64,
     pub mc_dev_db: Option<f64>,
     pub rarity: Rarity,
     pub generation: usize,
     pub fitness: Option<f64>,
     pub obj_summary: Option<String>,
+    pub is_hardware_verified: bool,
 }
 
-/// Load and analyze all entries in a checkpoint file
-pub fn load_archive_views(checkpoint_path: &Path) -> Result<Vec<ArchiveItemView<'static>>, Box<dyn std::error::Error>> {
+/// Load and analyze all entries in a checkpoint file without leaking memory
+pub fn load_archive_views(checkpoint_path: &Path) -> Result<Vec<ArchiveItemView>, Box<dyn std::error::Error>> {
     let content = fs::read_to_string(checkpoint_path)?;
     let checkpoint: CheckpointData = serde_json::from_str(&content)?;
 
@@ -201,24 +231,23 @@ pub fn load_archive_views(checkpoint_path: &Path) -> Result<Vec<ArchiveItemView<
     for (i, entry) in checkpoint.archive.entries.into_iter().enumerate() {
         let nn = nn_distances[i];
         let mc = entry.mc_dev_db;
-        let rarity = evaluate_rarity(nn, mc, &entry.descriptor);
+        let is_hw = entry.is_hardware_verified;
+        let rarity = evaluate_rarity_with_hw(nn, mc, &entry.descriptor, is_hw);
         let generation = entry.generation;
         let fitness = entry.fitness;
         let obj_summary = entry.obj_summary;
 
-        let static_circuit = Box::leak(Box::new(entry.circuit));
-        let static_desc = Box::leak(Box::new(entry.descriptor));
-
         views.push(ArchiveItemView {
             id: i,
-            circuit: static_circuit,
-            descriptor: static_desc,
+            circuit: entry.circuit,
+            descriptor: entry.descriptor,
             nn_dist: nn,
             mc_dev_db: mc,
             rarity,
             generation,
             fitness,
             obj_summary,
+            is_hardware_verified: is_hw,
         });
     }
 
@@ -259,9 +288,9 @@ pub fn list_archive(checkpoint_path: &Path) -> Result<(), Box<dyn std::error::Er
             Rarity::Common => common_count += 1,
         }
 
-        let spark = render_sparkline(item.descriptor);
-        let comps = summarize_components(item.circuit);
-        let char_tag = describe_character(item.descriptor);
+        let spark = render_sparkline(&item.descriptor);
+        let comps = summarize_components(&item.circuit);
+        let char_tag = describe_character(&item.descriptor);
         let mc_str = match item.mc_dev_db {
             Some(dev) => format!("{:.1}dB", dev),
             None => "--".to_string(),
@@ -309,7 +338,7 @@ pub fn show_circuit(checkpoint_path: &Path, circuit_id: usize) -> Result<(), Box
         .find(|it| it.id == circuit_id)
         .ok_or_else(|| format!("Circuit ID #{} not found in archive (total: {})", circuit_id, items.len()))?;
 
-    let d = item.descriptor;
+    let d = &item.descriptor;
 
     println!("\n=================================================================================");
     if item.generation > 0 {
@@ -447,8 +476,8 @@ pub fn export_bench_from_checkpoint(
     let target_dir = out_dir.unwrap_or(&default_dir);
 
     let report = crate::bench::generate_bench_package(
-        item.circuit,
-        item.descriptor,
+        &item.circuit,
+        &item.descriptor,
         target_dir,
         Duration::from_secs(3),
     )?;
@@ -462,7 +491,8 @@ pub fn export_bench_from_checkpoint(
 
     // Automatically render AoE SchemDraw schematic via uv
     let svg_path = target_dir.join("schematic.svg");
-    let status = std::process::Command::new("uv")
+    let uv_bin = get_uv_cmd();
+    let status = std::process::Command::new(&uv_bin)
         .args([
             "run",
             "--with",
@@ -497,7 +527,8 @@ pub fn draw_circuit_schematic(
         fs::create_dir_all(parent)?;
     }
 
-    let status = std::process::Command::new("uv")
+    let uv_bin = get_uv_cmd();
+    let status = std::process::Command::new(&uv_bin)
         .args([
             "run",
             "--with",
@@ -508,7 +539,17 @@ pub fn draw_circuit_schematic(
             &circuit_id.to_string(),
             target_svg.to_str().unwrap_or(""),
         ])
-        .status()?;
+        .status()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                format!(
+                    "uv binary '{}' not found in PATH or UV_PATH. Please install uv (https://astral.sh/uv) or set UV_PATH environment variable.",
+                    uv_bin
+                )
+            } else {
+                format!("Failed to execute '{}': {}", uv_bin, e)
+            }
+        })?;
 
     if !status.success() {
         return Err(format!("schemdraw renderer failed with status: {}", status).into());
@@ -544,6 +585,10 @@ mod tests {
         assert_eq!(evaluate_rarity(0.55, Some(2.0), &d_clipper), Rarity::Epic);
         assert_eq!(evaluate_rarity(0.55, Some(5.0), &d_clipper), Rarity::Common); // Too fragile for Epic
         assert_eq!(evaluate_rarity(0.75, Some(1.0), &d_clipper), Rarity::Legendary);
+
+        // Hardware verification promotes even common circuits to Legendary tier
+        assert_eq!(evaluate_rarity_with_hw(0.10, None, &d_clipper, true), Rarity::Legendary);
+        assert_eq!(evaluate_rarity_with_hw(0.10, None, &d_clipper, false), Rarity::Common);
     }
 
     #[test]

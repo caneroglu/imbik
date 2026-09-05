@@ -67,11 +67,32 @@ pub fn gaussian(mean: f64, std_dev: f64) -> f64 {
 
 /// Generate a realistic SPICE netlist wrapping the circuit with breadboard parasitics:
 /// Injects stray shunt capacitance (default 22pF) to ground on every active circuit node.
-pub fn to_realistic_netlist(circuit: &Circuit, title: &str, stray_cap_pf: f64) -> String {
+use rayon::prelude::*;
+
+/// Generate custom SPICE headers with perturbed BJT beta (Bf) parameters for Monte Carlo runs
+pub fn monte_carlo_spice_headers(bf_npn: f64, bf_pnp: f64) -> String {
+    format!(
+        concat!(
+            ".include \"tl072.sub\"\n",
+            ".model 1N4148 D(is=2.52n rs=0.568 n=1.752 cjo=4p m=0.4 tt=20n)\n",
+            ".model 2N3904 NPN(Is=6.734f Xti=3 Eg=1.11 Vaf=74.03 Bf={:.1} Ne=1.259 Ise=6.734f Ikf=66.78m Xtb=1.5 Br=.7371 Nc=2 Isc=0 Ikr=0 Rc=1 Cjc=3.638p Mjc=.3085 Vjc=.75 Fc=.5 Cje=4.493p Mje=.2593 Vje=.75 Tr=239.5n Tf=301.2p Itf=.4 Vtf=4 Xtf=2 Rb=10)\n",
+            ".model 2N3906 PNP(Is=1.41f Xti=3 Eg=1.11 Vaf=18.7 Bf={:.1} Ne=1.5 Ise=0 Ikf=80m Xtb=1.5 Br=4.977 Nc=2 Isc=0 Ikr=0 Rc=2 Cjc=4.5p Mjc=.3 Vjc=.75 Fc=.5 Cje=5p Mje=.3 Vje=.75 Tr=50n Tf=300p Itf=.4 Vtf=4 Xtf=2 Rb=10)\n",
+        ),
+        bf_npn, bf_pnp
+    )
+}
+
+/// Generate a realistic SPICE netlist wrapping the circuit with breadboard parasitics and custom headers
+pub fn to_realistic_netlist_with_headers(
+    circuit: &Circuit,
+    title: &str,
+    stray_cap_pf: f64,
+    headers: &str,
+) -> String {
     let mut netlist = String::new();
 
     netlist.push_str(&format!("* Realistic Netlist: {}\n", title));
-    netlist.push_str(standard_spice_headers());
+    netlist.push_str(headers);
 
     // Power supplies and AC input source
     netlist.push_str(&format!("V_in {} {} dc 0 ac 1\n", NODE_IN, NODE_GND));
@@ -117,6 +138,11 @@ pub fn to_realistic_netlist(circuit: &Circuit, title: &str, stray_cap_pf: f64) -
     netlist
 }
 
+/// Generate a realistic SPICE netlist with standard headers
+pub fn to_realistic_netlist(circuit: &Circuit, title: &str, stray_cap_pf: f64) -> String {
+    to_realistic_netlist_with_headers(circuit, title, stray_cap_pf, standard_spice_headers())
+}
+
 /// Perturb all Resistor and Capacitor values in the circuit by a Gaussian tolerance (e.g. 5%)
 pub fn perturb_circuit(circuit: &Circuit, tolerance: f64) -> Circuit {
     let mut perturbed = circuit.clone();
@@ -150,8 +176,8 @@ pub struct WorstCaseReport {
     pub total_runs: usize,
 }
 
-/// Perform Monte Carlo evaluation (default 20 runs) with Gaussian tolerance perturbation.
-/// Evaluates worst-case performance metric.
+/// Perform Monte Carlo evaluation with parallel SPICE execution and BJT beta variations.
+/// Evaluates worst-case environmental performance.
 pub fn evaluate_monte_carlo(
     circuit: &Circuit,
     runs: usize,
@@ -171,38 +197,84 @@ pub fn evaluate_monte_carlo(
         .map(|p| p.mag_db)
         .fold(f64::NEG_INFINITY, f64::max);
 
+    // 2. Perform Monte Carlo perturbed runs in parallel with Rayon
+    let mc_results: Vec<Option<(f64, f64)>> = (0..runs)
+        .into_par_iter()
+        .map(|run_idx| {
+            let mut perturbed = perturb_circuit(circuit, tolerance);
+            // Generate per-transistor Beta (Bf) models to capture real breadboard transistor mismatch
+            let mut per_bjt_headers = String::new();
+            let mut has_bjt = false;
+            for comp in &mut perturbed.components {
+                if comp.comp_type == ComponentType::Q {
+                    has_bjt = true;
+                    let is_pnp = comp.value.to_uppercase().contains("3906") || comp.value.to_uppercase().contains("PNP");
+                    let model_name = format!("{}_MC_{}", if is_pnp { "2N3906" } else { "2N3904" }, comp.id);
+                    if is_pnp {
+                        let bf = gaussian(180.0, 40.0).clamp(80.0, 300.0);
+                        per_bjt_headers.push_str(&format!(
+                            ".model {} PNP(Is=1.41f Xti=3 Eg=1.11 Vaf=18.7 Bf={:.1} Ne=1.5 Ise=0 Ikf=80m Xtb=1.5 Br=4.977 Nc=2 Isc=0 Ikr=0 Rc=2 Cjc=4.5p Mjc=.3 Vjc=.75 Fc=.5 Cje=5p Mje=.3 Vje=.75 Tr=50n Tf=300p Itf=.4 Vtf=4 Xtf=2 Rb=10)\n",
+                            model_name, bf
+                        ));
+                    } else {
+                        let bf = gaussian(300.0, 60.0).clamp(100.0, 450.0);
+                        per_bjt_headers.push_str(&format!(
+                            ".model {} NPN(Is=6.734f Xti=3 Eg=1.11 Vaf=74.03 Bf={:.1} Ne=1.259 Ise=6.734f Ikf=66.78m Xtb=1.5 Br=.7371 Nc=2 Isc=0 Ikr=0 Rc=1 Cjc=3.638p Mjc=.3085 Vjc=.75 Fc=.5 Cje=4.493p Mje=.2593 Vje=.75 Tr=239.5n Tf=301.2p Itf=.4 Vtf=4 Xtf=2 Rb=10)\n",
+                            model_name, bf
+                        ));
+                    }
+                    comp.value = model_name;
+                }
+            }
+
+            let headers = if has_bjt {
+                format!("{}\n{}", standard_spice_headers(), per_bjt_headers)
+            } else {
+                let bf_npn = gaussian(300.0, 60.0).clamp(100.0, 450.0);
+                let bf_pnp = gaussian(180.0, 40.0).clamp(80.0, 300.0);
+                monte_carlo_spice_headers(bf_npn, bf_pnp)
+            };
+
+            let netlist = to_realistic_netlist_with_headers(
+                &perturbed,
+                &format!("Monte Carlo Run #{}", run_idx + 1),
+                stray_cap_pf,
+                &headers,
+            );
+
+            if let Ok(sim) = run_simulation(&netlist, timeout) {
+                if let Some(ac) = sim.ac_response {
+                    let run_peak = ac
+                        .iter()
+                        .map(|p| p.mag_db)
+                        .fold(f64::NEG_INFINITY, f64::max);
+
+                    let mut max_dev = 0.0;
+                    for (nom_pt, run_pt) in nominal_ac.iter().zip(ac.iter()) {
+                        let diff = (nom_pt.mag_db - run_pt.mag_db).abs();
+                        if diff > max_dev {
+                            max_dev = diff;
+                        }
+                    }
+                    return Some((run_peak, max_dev));
+                }
+            }
+            None
+        })
+        .collect();
+
     let mut worst_case_peak_db = nominal_peak_db;
     let mut max_deviation_db = 0.0;
     let mut runs_passed = 0;
 
-    // 2. Perform Monte Carlo perturbed runs
-    for run_idx in 0..runs {
-        let perturbed = perturb_circuit(circuit, tolerance);
-        let netlist = to_realistic_netlist(
-            &perturbed,
-            &format!("Monte Carlo Run #{}", run_idx + 1),
-            stray_cap_pf,
-        );
-
-        if let Ok(sim) = run_simulation(&netlist, timeout) {
-            if let Some(ac) = sim.ac_response {
-                runs_passed += 1;
-                let run_peak = ac
-                    .iter()
-                    .map(|p| p.mag_db)
-                    .fold(f64::NEG_INFINITY, f64::max);
-
-                if run_peak < worst_case_peak_db {
-                    worst_case_peak_db = run_peak;
-                }
-
-                // Calculate point-by-point maximum magnitude difference against nominal
-                for (nom_pt, run_pt) in nominal_ac.iter().zip(ac.iter()) {
-                    let diff = (nom_pt.mag_db - run_pt.mag_db).abs();
-                    if diff > max_deviation_db {
-                        max_deviation_db = diff;
-                    }
-                }
+    for res in mc_results {
+        if let Some((run_peak, max_dev)) = res {
+            runs_passed += 1;
+            if run_peak < worst_case_peak_db {
+                worst_case_peak_db = run_peak;
+            }
+            if max_dev > max_deviation_db {
+                max_deviation_db = max_dev;
             }
         }
     }

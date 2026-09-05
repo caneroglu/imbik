@@ -41,16 +41,24 @@ impl Default for TestCondition {
     }
 }
 
+fn default_weight() -> f64 {
+    1.0
+}
+
 /// Individual probe target definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProbeTarget {
     pub name: String,
     pub probe_type: ProbeType,
+    #[serde(default)]
     pub condition: TestCondition,
     pub kind: ProbeKind,
     pub want: f64,
     pub soft: f64,
+    #[serde(default = "default_weight")]
     pub weight: f64,
+    #[serde(default, alias = "require")]
+    pub is_required: bool,
 }
 
 impl ProbeTarget {
@@ -74,7 +82,10 @@ impl ProbeTarget {
                     return 0.0;
                 }
                 // Logarithmic scaling for large dynamic ranges (e.g. impedance)
-                if self.want > 0.0 && self.soft > 0.0 {
+                if (self.probe_type == ProbeType::Zin || self.probe_type == ProbeType::Zout)
+                    && self.want > 0.0
+                    && self.soft > 0.0
+                {
                     let log_val = val.max(1e-9).log10();
                     let log_want = self.want.log10();
                     let log_soft = self.soft.log10();
@@ -91,6 +102,18 @@ impl ProbeTarget {
                 if val >= self.soft {
                     return 0.0;
                 }
+                // Logarithmic scaling for large dynamic ranges (e.g. impedance)
+                if (self.probe_type == ProbeType::Zin || self.probe_type == ProbeType::Zout)
+                    && self.want > 0.0
+                    && self.soft > 0.0
+                {
+                    let log_val = val.max(1e-9).log10();
+                    let log_want = self.want.log10();
+                    let log_soft = self.soft.log10();
+                    if (log_soft - log_want).abs() > 1e-9 {
+                        return ((log_soft - log_val) / (log_soft - log_want)).clamp(0.0, 1.0);
+                    }
+                }
                 ((self.soft - val) / (self.soft - self.want)).clamp(0.0, 1.0)
             }
         }
@@ -104,6 +127,8 @@ pub struct ObjectiveVector {
     pub values: Vec<f64>,
     pub scores: Vec<f64>,
     pub weights: Vec<f64>,
+    #[serde(default)]
+    pub is_required: Vec<bool>,
 }
 
 impl ObjectiveVector {
@@ -111,15 +136,23 @@ impl ObjectiveVector {
         Self::default()
     }
 
-    pub fn add(&mut self, name: &str, val: f64, score: f64, weight: f64) {
+    pub fn add(&mut self, name: &str, val: f64, score: f64, weight: f64, is_required: bool) {
         self.names.push(name.to_string());
         self.values.push(val);
         self.scores.push(score);
         self.weights.push(weight);
+        self.is_required.push(is_required);
     }
 
-    /// Weighted average scalarization for current evolutionary selection
+    /// Weighted average scalarization with hard requirement enforcement
     pub fn scalarized(&self) -> f64 {
+        // Hard requirement check: if any required probe scores 0.0, the candidate fails immediately
+        for (i, &req) in self.is_required.iter().enumerate() {
+            if req && self.scores.get(i).copied().unwrap_or(0.0) <= 0.0 {
+                return 0.0;
+            }
+        }
+
         let total_weight: f64 = self.weights.iter().sum();
         if total_weight <= 0.0 {
             return 0.0;
@@ -136,9 +169,10 @@ impl ObjectiveVector {
     pub fn summary(&self) -> String {
         let mut parts = Vec::new();
         for i in 0..self.names.len() {
+            let prefix = if self.is_required.get(i).copied().unwrap_or(false) { "*" } else { "" };
             parts.push(format!(
-                "{}={:.2} (sc={:.2})",
-                self.names[i], self.values[i], self.scores[i]
+                "{}{}={:.2} (sc={:.2})",
+                prefix, self.names[i], self.values[i], self.scores[i]
             ));
         }
         parts.join(" | ")
@@ -162,6 +196,11 @@ pub struct Preset {
 }
 
 impl Preset {
+    /// Generate unified ConstraintLimits representing this preset's feasibility rules
+    pub fn constraint_limits(&self) -> crate::constraints::ConstraintLimits {
+        crate::constraints::ConstraintLimits::from(self)
+    }
+
     /// Load preset by name (e.g. "buffer") or file path ("presets/buffer.toml")
     pub fn load_or_builtin(name_or_path: &str) -> Result<Self, String> {
         let path = Path::new(name_or_path);
@@ -204,6 +243,7 @@ impl Preset {
                     want: 1.0,
                     soft: 0.5,
                     weight: 3.0,
+                    is_required: true,
                 },
                 ProbeTarget {
                     name: "Zin@1kHz".to_string(),
@@ -217,6 +257,7 @@ impl Preset {
                     want: 1_000_000.0, // 1 MegOhm (Bootstrap target, well below 7.23M stray ceiling)
                     soft: 10_000.0,    // 10 kOhm
                     weight: 3.5,
+                    is_required: false,
                 },
                 ProbeTarget {
                     name: "DcOffset".to_string(),
@@ -226,6 +267,7 @@ impl Preset {
                     want: 0.02, // 20 mV
                     soft: 0.80, // 800 mV
                     weight: 1.5,
+                    is_required: true,
                 },
                 ProbeTarget {
                     name: "BOM_Count".to_string(),
@@ -235,6 +277,7 @@ impl Preset {
                     want: 4.0,  // 4-5 components minimum for discrete follower
                     soft: 10.0, // 10 components
                     weight: 1.0,
+                    is_required: false,
                 },
             ],
         }
@@ -253,3 +296,153 @@ impl Preset {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_buffer_toml_parsing_and_required_probes() {
+        let preset = Preset::load_or_builtin("presets/buffer.toml").expect("Failed to load buffer.toml");
+        assert_eq!(preset.name, "buffer");
+        assert_eq!(preset.probes.len(), 4);
+
+        // Verify required flags
+        let gain_probe = preset.probes.iter().find(|p| p.name == "Gain@1kHz").expect("Gain probe missing");
+        assert!(gain_probe.is_required, "Gain@1kHz must be required");
+
+        let dc_probe = preset.probes.iter().find(|p| p.name == "DcOffset").expect("DcOffset probe missing");
+        assert!(dc_probe.is_required, "DcOffset must be required");
+
+        let zin_probe = preset.probes.iter().find(|p| p.name == "Zin@1kHz").expect("Zin probe missing");
+        assert!(!zin_probe.is_required, "Zin@1kHz is an optimization target, not strict requirement");
+    }
+
+    #[test]
+    fn test_required_probe_zero_drop() {
+        let preset = Preset::buffer_default();
+        let mut obj_vec = ObjectiveVector::new();
+
+        // Simulate: Gain=1.0 (score 1.0), Zin=100k (score 0.5), DcOffset=1.5V (score 0.0, required!), BOM=5 (score 0.8)
+        let p0 = &preset.probes[0];
+        obj_vec.add(&p0.name, 1.0, p0.score(1.0), p0.weight, p0.is_required);
+        let p1 = &preset.probes[1];
+        obj_vec.add(&p1.name, 100_000.0, p1.score(100_000.0), p1.weight, p1.is_required);
+        let p2 = &preset.probes[2];
+        obj_vec.add(&p2.name, 1.5, p2.score(1.5), p2.weight, p2.is_required);
+        let p3 = &preset.probes[3];
+        obj_vec.add(&p3.name, 5.0, p3.score(5.0), p3.weight, p3.is_required);
+
+        println!("Objective vector with failed required probe:\n  {}", obj_vec.summary());
+        assert_eq!(obj_vec.scalarized(), 0.0, "Fitness MUST drop to 0.0 if any required probe fails");
+    }
+
+    #[test]
+    fn test_sallen_key_10k_toml_evaluation() {
+        let preset = Preset::load_or_builtin("sallen_key_10k").expect("Failed to load sallen_key_10k.toml");
+        assert_eq!(preset.name, "sallen_key_10k");
+        assert!(preset.allow_opamps);
+
+        // Build textbook 10kHz Sallen-Key Lowpass (R1=11k, R2=11k, C1=2.2nF, C2=1.0nF, TL072)
+        let mut sk = crate::circuit::Circuit::new();
+        sk.add_component(crate::circuit::Component::new('R', 1, vec![crate::circuit::NODE_IN, 10], "11k").unwrap());
+        sk.add_component(crate::circuit::Component::new('R', 2, vec![10, 20], "11k").unwrap());
+        sk.add_component(crate::circuit::Component::new('C', 1, vec![10, crate::circuit::NODE_OUT], "2.2nF").unwrap());
+        sk.add_component(crate::circuit::Component::new('C', 2, vec![20, crate::circuit::NODE_GND], "1.0nF").unwrap());
+        sk.add_component(
+            crate::circuit::Component::new('X', 1, vec![20, crate::circuit::NODE_OUT, crate::circuit::NODE_VCC, crate::circuit::NODE_VEE, crate::circuit::NODE_OUT], "TL072").unwrap(),
+        );
+
+        let timeout = std::time::Duration::from_secs(5);
+        let obj_vec = crate::fitness::evaluate_preset(&sk, &preset, 0.0, timeout)
+            .expect("Textbook Sallen-Key must pass feasibility gate and evaluate successfully");
+
+        println!("Textbook Sallen-Key 10kHz Evaluation:\n  {}", obj_vec.summary());
+        let score = obj_vec.scalarized();
+        println!("Scalarized Score: {:.4}", score);
+        assert!(score > 0.85, "Textbook Sallen-Key should achieve > 0.85 fitness, got {:.4}", score);
+    }
+
+    #[test]
+    fn test_op_seed_evaluation() {
+        let preset = Preset::load_or_builtin("sallen_key_10k").unwrap();
+        let mut op_seed = crate::circuit::Circuit::new();
+        op_seed.add_component(
+            crate::circuit::Component::new('X', 1, vec![crate::circuit::NODE_IN, crate::circuit::NODE_OUT, crate::circuit::NODE_VCC, crate::circuit::NODE_VEE, crate::circuit::NODE_OUT], "TL072").unwrap(),
+        );
+
+        let timeout = std::time::Duration::from_secs(5);
+        let obj_op = crate::fitness::evaluate_preset(&op_seed, &preset, 0.0, timeout)
+            .expect("Op-amp follower must evaluate successfully");
+        assert!(obj_op.scalarized() > 0.50, "Op-amp follower seed should score > 0.50 baseline");
+
+        let mut pass_seed = crate::circuit::Circuit::new();
+        pass_seed.add_component(crate::circuit::Component::new('R', 1, vec![crate::circuit::NODE_IN, crate::circuit::NODE_OUT], "10k").unwrap());
+        let obj_pass = crate::fitness::evaluate_preset(&pass_seed, &preset, 0.0, timeout)
+            .expect("Passive seed evaluates but should fail required passband probe");
+        assert_eq!(obj_pass.scalarized(), 0.0, "Passive attenuator must drop to 0.0 on required passband gain");
+    }
+
+    #[test]
+    fn test_textbook_gyrator_simulation() {
+        let mut gyr = crate::circuit::Circuit::new();
+        // 4-Component Textbook Single Op-Amp Gyrator:
+        // RL = 100 Ohm between IN (1) and OUT (2)
+        gyr.add_component(crate::circuit::Component::new('R', 1, vec![crate::circuit::NODE_IN, crate::circuit::NODE_OUT], "100").unwrap());
+        // C = 100nF between IN (1) and internal node 10
+        gyr.add_component(crate::circuit::Component::new('C', 1, vec![crate::circuit::NODE_IN, 10], "100nF").unwrap());
+        // R = 100k between internal node 10 and GND (0)
+        gyr.add_component(crate::circuit::Component::new('R', 2, vec![10, crate::circuit::NODE_GND], "100k").unwrap());
+        // X1 TL072 follower: non-inv=10, inv=2, vcc=3, vee=4, out=2
+        gyr.add_component(crate::circuit::Component::new('X', 1, vec![10, crate::circuit::NODE_OUT, crate::circuit::NODE_VCC, crate::circuit::NODE_VEE, crate::circuit::NODE_OUT], "TL072").unwrap());
+
+        assert!(gyr.validate().is_ok(), "Textbook gyrator must pass circuit validation");
+
+        // Run SPICE simulation on this netlist
+        let netlist = gyr.to_netlist("Textbook Gyrator Active Inductor Test");
+        let timeout = std::time::Duration::from_secs(5);
+        let sim_res = crate::spice::run_simulation(&netlist, timeout).expect("Gyrator simulation failed");
+
+        println!("=== TEXTBOOK GYRATOR SPICE SIMULATION ===");
+        let v_out = sim_res.dc_nodes.get("2").copied().unwrap_or(0.0);
+        println!("DC Operating Point Output: {:.4} V", v_out);
+        // Test with Preset loaded from presets/gyrator.toml
+        let gyr_preset = Preset::load_or_builtin("gyrator").expect("Failed to load presets/gyrator.toml");
+        let obj = crate::fitness::evaluate_preset(&gyr, &gyr_preset, 0.0, timeout)
+            .expect("Gyrator evaluation failed");
+        println!("\n=== GYRATOR PRESET OBJECTIVES ===");
+        println!("{}", obj.summary());
+        let score = obj.scalarized();
+        println!("Scalarized Fitness: {:.4}", score);
+        assert!(score > 0.90, "Textbook gyrator must score > 0.90 on inductive Zin & gain probes, got {:.4}", score);
+    }
+
+    #[test]
+    fn test_textbook_cap_multiplier_simulation() {
+        let mut cm = crate::circuit::Circuit::new();
+        // 4-Component Textbook Single Op-Amp Capacitance Multiplier:
+        // R1 = 10k between IN (1) and internal node 10
+        cm.add_component(crate::circuit::Component::new('R', 1, vec![crate::circuit::NODE_IN, 10], "10k").unwrap());
+        // C1 = 100nF between internal node 10 and GND (0)
+        cm.add_component(crate::circuit::Component::new('C', 1, vec![10, crate::circuit::NODE_GND], "100nF").unwrap());
+        // RL = 100 Ohm between IN (1) and OUT (2)
+        cm.add_component(crate::circuit::Component::new('R', 2, vec![crate::circuit::NODE_IN, crate::circuit::NODE_OUT], "100").unwrap());
+        // X1 TL072 follower: non-inv=10, inv=2, vcc=3, vee=4, out=2
+        cm.add_component(crate::circuit::Component::new('X', 1, vec![10, crate::circuit::NODE_OUT, crate::circuit::NODE_VCC, crate::circuit::NODE_VEE, crate::circuit::NODE_OUT], "TL072").unwrap());
+
+        assert!(cm.validate().is_ok(), "Textbook cap multiplier must pass circuit validation");
+
+        let timeout = std::time::Duration::from_secs(5);
+        let cm_preset = Preset::load_or_builtin("cap_multiplier").expect("Failed to load presets/cap_multiplier.toml");
+        let obj = crate::fitness::evaluate_preset(&cm, &cm_preset, 0.0, timeout)
+            .expect("Cap multiplier evaluation failed");
+
+        println!("\n=== CAPACITANCE MULTIPLIER PRESET OBJECTIVES ===");
+        println!("{}", obj.summary());
+        let score = obj.scalarized();
+        println!("Scalarized Fitness: {:.4}", score);
+        assert!(score > 0.90, "Textbook cap multiplier must score > 0.90, got {:.4}", score);
+    }
+}
+
+

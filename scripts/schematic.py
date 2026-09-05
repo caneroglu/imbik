@@ -587,7 +587,8 @@ def render_circuit_schematic(circuit_dict, outfile, title="Imbik Evolved Circuit
 
         # H. Output terminal
         x_2, y_2 = node_x.get(NODE_OUT, current_x), ny(NODE_OUT)
-        d += elm.Line().right().at((x_2, y_2)).length(1.0).label('OUT (Node 2)', loc='right')
+        x_out_end = max(x_2 + 1.0, max(node_x.values()) + 1.0)
+        d += elm.Line().right().at((x_2, y_2)).to((x_out_end, y_2)).label('OUT (Node 2)', loc='right')
         d.add(elm.Dot().at((x_2, y_2)))
 
         # I. Off-path transistors, wired with net labels instead of long routed traces
@@ -598,6 +599,20 @@ def render_circuit_schematic(circuit_dict, outfile, title="Imbik Evolved Circuit
                 node_label(_b), loc='left')
             draw_bjt(d, c, bx, by, node_x, ny, y_vcc, y_vee)
 
+        # Collect bridge tracks per node so non-signal-axis nodes only connect between their tracks
+        bridge_node_tracks = defaultdict(list)
+        for gi, c, u, v in bridge_comps:
+            bridge_node_tracks[u].append(track_y[gi])
+            bridge_node_tracks[v].append(track_y[gi])
+
+        anchored_nodes = set(node_y.keys())
+        for gi, c, rail, other, both in rail_comps:
+            anchored_nodes.add(other)
+        for gi, c, u in shunt_comps:
+            anchored_nodes.add(u)
+
+        drawn_bridge_verticals = set()
+
         # J. Bridge / feedback ladder (upper half)
         for gi, c, u, v in bridge_comps:
             xu, xv = node_x.get(u, 0.0), node_x.get(v, 0.0)
@@ -606,8 +621,27 @@ def render_circuit_schematic(circuit_dict, outfile, title="Imbik Evolved Circuit
             if abs(x_end - x_start) < 1e-9:
                 continue
             n_start, n_end = (u, v) if xu <= xv else (v, u)
-            d += elm.Line().up().at((x_start, ny(n_start))).to((x_start, y))
-            d += elm.Line().up().at((x_end, ny(n_end))).to((x_end, y))
+
+            # Left vertical trunk
+            if n_start in anchored_nodes:
+                d += elm.Line().up().at((x_start, ny(n_start))).to((x_start, y))
+            elif n_start not in drawn_bridge_verticals:
+                t_min = min(bridge_node_tracks[n_start])
+                t_max = max(bridge_node_tracks[n_start])
+                if t_max > t_min:
+                    d += elm.Line().up().at((x_start, t_min)).to((x_start, t_max))
+                drawn_bridge_verticals.add(n_start)
+
+            # Right vertical trunk
+            if n_end in anchored_nodes:
+                d += elm.Line().up().at((x_end, ny(n_end))).to((x_end, y))
+            elif n_end not in drawn_bridge_verticals:
+                t_min = min(bridge_node_tracks[n_end])
+                t_max = max(bridge_node_tracks[n_end])
+                if t_max > t_min:
+                    d += elm.Line().up().at((x_end, t_min)).to((x_end, t_max))
+                drawn_bridge_verticals.add(n_end)
+
             d.add(elm.Dot().at((x_start, y)))
             d.add(elm.Dot().at((x_end, y)))
             el, val = get_element(c['comp_type'], c['value'])

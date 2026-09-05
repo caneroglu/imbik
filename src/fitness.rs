@@ -135,13 +135,13 @@ pub fn to_characterization_netlist(circuit: &Circuit, title: &str, stray_cap_pf:
     netlist.push_str("print allv\n");
     netlist.push_str("ac dec 50 10 100k\n");
     netlist.push_str(&format!("wrdata ac_out.txt v({})\n", NODE_OUT));
-    netlist.push_str("tran 10us 5ms\n");
+    netlist.push_str("tran 1us 5ms 0 1us\n");
     netlist.push_str(&format!("wrdata tran_small.txt v({}) v({})\n", NODE_OUT, NODE_IN));
     netlist.push_str("alter @v_in[sin] = [ 0 2.0 1k ]\n");
-    netlist.push_str("tran 10us 5ms\n");
+    netlist.push_str("tran 1us 5ms 0 1us\n");
     netlist.push_str(&format!("wrdata tran_large.txt v({}) v({})\n", NODE_OUT, NODE_IN));
-    netlist.push_str("alter @v_in[sin] = [ 0 0 0 ]\n");
-    netlist.push_str("tran 20us 10ms\n");
+    netlist.push_str("alter @v_in[pulse] = [ 0.2 0 0 100ns 100ns 10us 1 ]\n");
+    netlist.push_str("tran 10us 10ms 0 10us\n");
     netlist.push_str(&format!("wrdata tran_zero.txt v({})\n", NODE_OUT));
     netlist.push_str("quit\n");
     netlist.push_str(".endc\n");
@@ -198,9 +198,26 @@ pub fn to_probe_netlist(circuit: &Circuit, preset: &Preset, stray_cap_pf: f64) -
     netlist.push_str(&format!("* Preset Probe Netlist: {}\n", preset.name));
     netlist.push_str(standard_spice_headers());
 
+    let mut ac_probes = Vec::new();
+    for (idx, p) in preset.probes.iter().enumerate() {
+        if matches!(p.probe_type, ProbeType::Gain | ProbeType::Zin | ProbeType::Zout) {
+            let vin = if p.condition.vin > 0.0 { p.condition.vin } else { 0.1 };
+            let r_load = if p.condition.r_load > 0.0 { p.condition.r_load } else { 10000.0 };
+            ac_probes.push((idx, vin, r_load, p.probe_type));
+        }
+    }
+
+    let default_vin = ac_probes.first().map(|p| p.1).unwrap_or(0.1);
+    let default_r_load = ac_probes.first().map(|p| p.2).unwrap_or(10000.0);
+
     netlist.push_str(&format!(
-        "V_in {} {} dc 0 ac 1\n",
-        NODE_IN, NODE_GND
+        "V_in {} {} dc 0 ac {:.4}\n",
+        NODE_IN, NODE_GND, default_vin
+    ));
+    // Test current source for Zout measurement (normally 0 AC, altered to 1 AC during Zout sweep)
+    netlist.push_str(&format!(
+        "I_test_probe {} {} dc 0 ac 0\n",
+        NODE_GND, NODE_OUT
     ));
     netlist.push_str(&format!("V_cc {} {} dc {:.2}\n", NODE_VCC, NODE_GND, circuit.vcc));
     netlist.push_str(&format!("V_ee {} {} dc {:.2}\n", NODE_VEE, NODE_GND, circuit.vee));
@@ -217,15 +234,7 @@ pub fn to_probe_netlist(circuit: &Circuit, preset: &Preset, stray_cap_pf: f64) -
         netlist.push_str(&format!("{}{:<4} {} {}\n", prefix, comp.id, nodes_str, comp.value));
     }
 
-    // Connect R_load from NODE_OUT to NODE_GND if specified in probes
-    let mut r_load = 10000.0;
-    for p in &preset.probes {
-        if p.condition.r_load > 0.0 {
-            r_load = p.condition.r_load;
-            break;
-        }
-    }
-    netlist.push_str(&format!("R_probe_load {} {} {:.2}\n", NODE_OUT, NODE_GND, r_load));
+    netlist.push_str(&format!("R_probe_load {} {} {:.2}\n", NODE_OUT, NODE_GND, default_r_load));
 
     if stray_cap_pf > 0.0 {
         let mut id_counter = 8000;
@@ -240,14 +249,57 @@ pub fn to_probe_netlist(circuit: &Circuit, preset: &Preset, stray_cap_pf: f64) -
         }
     }
 
-    // Compute AC transfer function and input impedance
+    // Compute AC transfer function, input impedance, and output impedance in one process
     netlist.push_str(".control\n");
     netlist.push_str("op\n");
     netlist.push_str("print allv\n");
-    netlist.push_str("ac dec 10 100 100k\n");
-    netlist.push_str(&format!("let gain = mag(v({})/v({}))\n", NODE_OUT, NODE_IN));
-    netlist.push_str(&format!("let zin = mag(v({})/i(v_in))\n", NODE_IN));
-    netlist.push_str("wrdata probe_ac.txt gain zin\n");
+
+    let all_same = ac_probes.windows(2).all(|w| {
+        (w[0].1 - w[1].1).abs() < 1e-9 && (w[0].2 - w[1].2).abs() < 1e-9
+    });
+
+    if all_same || ac_probes.is_empty() {
+        netlist.push_str("ac dec 50 10 100k\n");
+        netlist.push_str(&format!("let gain = mag(v({})/v({}))\n", NODE_OUT, NODE_IN));
+        netlist.push_str(&format!("let zin = mag(v({})/i(v_in))\n", NODE_IN));
+        netlist.push_str("wrdata probe_ac.txt gain zin\n");
+        netlist.push_str("alter @v_in[ac] = 0\n");
+        netlist.push_str("alter @i_test_probe[ac] = 1\n");
+        netlist.push_str("ac dec 50 10 100k\n");
+        netlist.push_str(&format!("let zout = mag(v({}))\n", NODE_OUT));
+        netlist.push_str("wrdata probe_zout.txt zout\n");
+    } else {
+        // Also write baseline probe_ac.txt for index 0 or fallback
+        netlist.push_str("ac dec 50 10 100k\n");
+        netlist.push_str(&format!("let gain = mag(v({})/v({}))\n", NODE_OUT, NODE_IN));
+        netlist.push_str(&format!("let zin = mag(v({})/i(v_in))\n", NODE_IN));
+        netlist.push_str("wrdata probe_ac.txt gain zin\n");
+        netlist.push_str("alter @v_in[ac] = 0\n");
+        netlist.push_str("alter @i_test_probe[ac] = 1\n");
+        netlist.push_str("ac dec 50 10 100k\n");
+        netlist.push_str(&format!("let zout = mag(v({}))\n", NODE_OUT));
+        netlist.push_str("wrdata probe_zout.txt zout\n");
+
+        for &(idx, vin, r_load, ptype) in &ac_probes {
+            if ptype == ProbeType::Zout {
+                netlist.push_str("alter @v_in[ac] = 0\n");
+                netlist.push_str("alter @i_test_probe[ac] = 1\n");
+                netlist.push_str(&format!("alter r_probe_load = {:.2}\n", r_load));
+                netlist.push_str("ac dec 50 10 100k\n");
+                netlist.push_str(&format!("let zout_{} = mag(v({}))\n", idx, NODE_OUT));
+                netlist.push_str(&format!("wrdata probe_zout_{}.txt zout_{}\n", idx, idx));
+            } else {
+                netlist.push_str(&format!("alter @v_in[ac] = {:.4}\n", vin));
+                netlist.push_str(&format!("alter r_probe_load = {:.2}\n", r_load));
+                netlist.push_str("alter @i_test_probe[ac] = 0\n");
+                netlist.push_str("ac dec 50 10 100k\n");
+                netlist.push_str(&format!("let gain_{} = mag(v({})/v({}))\n", idx, NODE_OUT, NODE_IN));
+                netlist.push_str(&format!("let zin_{} = mag(v({})/i(v_in))\n", idx, NODE_IN));
+                netlist.push_str(&format!("wrdata probe_ac_{}.txt gain_{} zin_{}\n", idx, idx, idx));
+            }
+        }
+    }
+
     netlist.push_str("quit\n");
     netlist.push_str(".endc\n");
     netlist.push_str(".end\n");
@@ -255,12 +307,48 @@ pub fn to_probe_netlist(circuit: &Circuit, preset: &Preset, stray_cap_pf: f64) -
     netlist
 }
 
+/// Helper function to perform log-frequency linear interpolation across probe AC sweeps
+fn interpolate_probe<F>(probe_ac: &[crate::spice::ProbeAcPoint], target_freq: f64, extractor: F) -> f64
+where
+    F: Fn(&crate::spice::ProbeAcPoint) -> f64,
+{
+    if probe_ac.is_empty() {
+        return 0.0;
+    }
+    if target_freq <= probe_ac[0].freq {
+        return extractor(&probe_ac[0]);
+    }
+    if target_freq >= probe_ac.last().unwrap().freq {
+        return extractor(probe_ac.last().unwrap());
+    }
+
+    for i in 1..probe_ac.len() {
+        if probe_ac[i].freq >= target_freq {
+            let p0 = &probe_ac[i - 1];
+            let p1 = &probe_ac[i];
+            let log_f0 = p0.freq.max(1e-6).log10();
+            let log_f1 = p1.freq.max(1e-6).log10();
+            let log_target = target_freq.max(1e-6).log10();
+            let span = log_f1 - log_f0;
+            let t = if span > 1e-9 {
+                (log_target - log_f0) / span
+            } else {
+                0.0
+            };
+            let v0 = extractor(p0);
+            let v1 = extractor(p1);
+            return v0 + t * (v1 - v0);
+        }
+    }
+    extractor(probe_ac.last().unwrap())
+}
+
 /// Evaluate circuit against preset targets:
 /// 1. Feasibility Gate (.op Fast-Drop):
 ///    - Output rail saturation check
 ///    - DC offset check
 ///    - BJT Active Region check (Vbe >= 0.45V, Vce >= 0.15V)
-/// 2. Pluggable AC Probe Simulation
+/// 2. Pluggable AC Probe Simulation with log-frequency interpolation
 /// 3. Returns ObjectiveVector with normalized scores and scalarized fitness
 pub fn evaluate_preset(
     circuit: &Circuit,
@@ -324,50 +412,37 @@ pub fn evaluate_preset(
     let probe_netlist = to_probe_netlist(circuit, preset, stray_cap_pf);
     let sim_res = run_simulation(&probe_netlist, timeout)?;
 
-    let probe_ac = sim_res.probe_ac.ok_or(FitnessError::MissingProbeData)?;
-    if probe_ac.is_empty() {
+    let default_probe_ac = sim_res.probe_ac.as_deref().unwrap_or(&[]);
+    if default_probe_ac.is_empty()
+        && sim_res
+            .probe_ac_map
+            .as_ref()
+            .map(|m| m.is_empty())
+            .unwrap_or(true)
+    {
         return Err(FitnessError::MissingProbeData);
     }
 
     let mut obj_vec = ObjectiveVector::new();
 
-    for target in &preset.probes {
+    for (target_idx, target) in preset.probes.iter().enumerate() {
+        let target_probe_ac: &[crate::spice::ProbeAcPoint] = sim_res
+            .probe_ac_map
+            .as_ref()
+            .and_then(|m| m.get(&target_idx))
+            .map(|v| v.as_slice())
+            .unwrap_or(default_probe_ac);
+
         let measured_val = match target.probe_type {
-            ProbeType::Gain => {
-                let target_freq = target.condition.freq;
-                let closest = probe_ac
-                    .iter()
-                    .min_by(|a, b| {
-                        (a.freq - target_freq)
-                            .abs()
-                            .partial_cmp(&(b.freq - target_freq).abs())
-                            .unwrap()
-                    })
-                    .map(|p| p.gain)
-                    .unwrap_or(0.0);
-                closest
-            }
-            ProbeType::Zin => {
-                let target_freq = target.condition.freq;
-                let closest = probe_ac
-                    .iter()
-                    .min_by(|a, b| {
-                        (a.freq - target_freq)
-                            .abs()
-                            .partial_cmp(&(b.freq - target_freq).abs())
-                            .unwrap()
-                    })
-                    .map(|p| p.zin)
-                    .unwrap_or(0.0);
-                closest
-            }
-            ProbeType::Zout => 0.0,
+            ProbeType::Gain => interpolate_probe(target_probe_ac, target.condition.freq, |p| p.gain),
+            ProbeType::Zin => interpolate_probe(target_probe_ac, target.condition.freq, |p| p.zin),
+            ProbeType::Zout => interpolate_probe(target_probe_ac, target.condition.freq, |p| p.zout),
             ProbeType::DcOffset => v_out.abs(),
             ProbeType::Bom => circuit.components.len() as f64,
         };
 
         let score = target.score(measured_val);
-        obj_vec.add(&target.name, measured_val, score, target.weight);
+        obj_vec.add(&target.name, measured_val, score, target.weight, target.is_required);
     }
 
     Ok(obj_vec)
@@ -416,56 +491,123 @@ pub fn extract_behavior_descriptor(
 }
 
 /// Extract normalized filter flag, cutoff frequency, roll-off slope, and peak Q
+///
+/// Ref: Passband maximum gain `max_mag_db` across frequency sweep.
+/// - Low-pass / Band-pass: finds upper -3dB cutoff above the passband peak.
+/// - High-pass: finds lower -3dB cutoff below the passband peak.
+/// - Wideband buffer / flat response: no -3dB drop in 10Hz..100kHz -> has_filter = 0.0.
 pub fn extract_ac_features(ac: &[AcPoint]) -> (f64, f64, f64, f64) {
     if ac.is_empty() {
         return (0.0, 0.0, 0.0, 0.0);
     }
 
-    let ref_db = ac[0].mag_db;
-    let target_db = ref_db - 3.01;
+    // 1. Find global peak magnitude and its index
+    let mut max_idx = 0;
+    let mut max_mag_db = f64::NEG_INFINITY;
+    for (i, p) in ac.iter().enumerate() {
+        if p.mag_db > max_mag_db {
+            max_mag_db = p.mag_db;
+            max_idx = i;
+        }
+    }
 
-    let mut cutoff_freq = 0.0;
-    let mut cutoff_idx = 0;
-    let mut has_cutoff = false;
+    let target_db = max_mag_db - 3.01;
 
-    for i in 1..ac.len() {
+    // 2. Search for upper cutoff (above peak: low-pass or band-pass high edge)
+    let mut upper_cutoff_freq = None;
+    let mut upper_cutoff_idx = None;
+    for i in (max_idx + 1)..ac.len() {
         if ac[i].mag_db <= target_db {
             let p_prev = &ac[i - 1];
             let p_curr = &ac[i];
             let span = p_curr.mag_db - p_prev.mag_db;
-            if span.abs() > 1e-6 {
+            let freq = if span.abs() > 1e-6 {
                 let frac = (target_db - p_prev.mag_db) / span;
-                cutoff_freq = p_prev.freq + frac * (p_curr.freq - p_prev.freq);
+                p_prev.freq + frac * (p_curr.freq - p_prev.freq)
             } else {
-                cutoff_freq = p_curr.freq;
-            }
-            cutoff_idx = i;
-            has_cutoff = true;
+                p_curr.freq
+            };
+            upper_cutoff_freq = Some(freq);
+            upper_cutoff_idx = Some(i);
             break;
         }
     }
 
-    let has_filter = if has_cutoff { 1.0 } else { 0.0 };
-    let cutoff_norm = if has_cutoff {
+    // 3. Search for lower cutoff (below peak: high-pass or band-pass low edge)
+    let mut lower_cutoff_freq = None;
+    let mut _lower_cutoff_idx = None;
+    if max_idx > 0 {
+        for i in (0..max_idx).rev() {
+            if ac[i].mag_db <= target_db {
+                let p_prev = &ac[i + 1];
+                let p_curr = &ac[i];
+                let span = p_curr.mag_db - p_prev.mag_db;
+                let freq = if span.abs() > 1e-6 {
+                    let frac = (target_db - p_prev.mag_db) / span;
+                    p_prev.freq + frac * (p_curr.freq - p_prev.freq)
+                } else {
+                    p_curr.freq
+                };
+                lower_cutoff_freq = Some(freq);
+                _lower_cutoff_idx = Some(i);
+                break;
+            }
+        }
+    }
+
+    // 4. Determine filter cutoff frequency & rolloff
+    let (has_filter, cutoff_freq, rolloff_norm) = match (upper_cutoff_freq, lower_cutoff_freq) {
+        (Some(f_up), _) => {
+            // Low-pass or Band-pass: upper cutoff dominates audio bandwidth
+            let idx = upper_cutoff_idx.unwrap();
+            let mut rolloff = 0.0;
+            if idx < ac.len() - 1 {
+                let last_pt = &ac[ac.len() - 1];
+                let dec_span = (last_pt.freq / f_up.max(1.0)).log10();
+                if dec_span > 0.2 {
+                    let db_drop = last_pt.mag_db - target_db;
+                    let slope_db_per_dec = db_drop / dec_span;
+                    rolloff = (slope_db_per_dec / -40.0).clamp(-0.5, 1.5);
+                }
+            }
+            (1.0, f_up, rolloff)
+        }
+        (None, Some(f_low)) => {
+            // High-pass filter
+            let mut rolloff = 0.0;
+            let first_pt = &ac[0];
+            let dec_span = (f_low.max(1.0) / first_pt.freq.max(1.0)).log10();
+            if dec_span > 0.2 {
+                let db_drop = first_pt.mag_db - target_db;
+                let slope_db_per_dec = db_drop / dec_span;
+                rolloff = (slope_db_per_dec / -40.0).clamp(-0.5, 1.5);
+            }
+            (1.0, f_low, rolloff)
+        }
+        (None, None) => (0.0, 0.0, 0.0),
+    };
+
+    let cutoff_norm = if has_filter > 0.5 {
         (cutoff_freq.clamp(10.0, 100_000.0).log10() / 5.0).clamp(0.0, 1.0)
     } else {
         0.0
     };
 
-    let mut rolloff_norm = 0.0;
-    if has_cutoff && cutoff_idx < ac.len() - 1 {
-        let last_pt = &ac[ac.len() - 1];
-        let dec_span = (last_pt.freq / cutoff_freq.max(1.0)).log10();
-        if dec_span > 0.2 {
-            let db_drop = last_pt.mag_db - target_db;
-            let slope_db_per_dec = db_drop / dec_span;
-            rolloff_norm = (slope_db_per_dec / -40.0).clamp(-0.5, 1.5);
-        }
-    }
-
-    let max_mag_db = ac.iter().map(|p| p.mag_db).fold(f64::NEG_INFINITY, f64::max);
-    let peak_boost = (max_mag_db - ref_db).max(0.0);
-    let peak_q_norm = (peak_boost / 20.0).clamp(0.0, 1.5);
+    // 5. Peak Q / Resonance boost above passband floor
+    // Lowpass: passband floor at low freq (ac[0]). Highpass: passband floor at high freq (ac.last()).
+    let passband_floor_db = if upper_cutoff_freq.is_some() {
+        ac[0].mag_db
+    } else if lower_cutoff_freq.is_some() {
+        ac.last().map(|p| p.mag_db).unwrap_or(max_mag_db)
+    } else {
+        max_mag_db
+    };
+    let peak_boost = (max_mag_db - passband_floor_db).max(0.0);
+    let peak_q_norm = if has_filter > 0.5 {
+        (peak_boost / 20.0).clamp(0.0, 1.5)
+    } else {
+        0.0
+    };
 
     (has_filter, cutoff_norm, rolloff_norm, peak_q_norm)
 }
@@ -493,6 +635,37 @@ pub fn interpolate_tran(pts: &[TranPoint], t: f64) -> f64 {
                 p0.v_out + frac * (p1.v_out - p0.v_out)
             } else {
                 p0.v_out
+            }
+        }
+    }
+}
+
+/// Interpolate input voltage v_in at exact time `t` from sorted TranPoint slice
+pub fn interpolate_tran_in(pts: &[TranPoint], t: f64) -> f64 {
+    if pts.is_empty() {
+        return 0.0;
+    }
+    let get_v_in = |p: &TranPoint| p.v_in.unwrap_or(0.0);
+    if t <= pts[0].time {
+        return get_v_in(&pts[0]);
+    }
+    if t >= pts[pts.len() - 1].time {
+        return get_v_in(&pts[pts.len() - 1]);
+    }
+
+    match pts.binary_search_by(|p| p.time.partial_cmp(&t).unwrap_or(std::cmp::Ordering::Equal)) {
+        Ok(i) => get_v_in(&pts[i]),
+        Err(i) => {
+            let p0 = &pts[i - 1];
+            let p1 = &pts[i];
+            let dt = p1.time - p0.time;
+            let v0 = get_v_in(p0);
+            let v1 = get_v_in(p1);
+            if dt > 1e-12 {
+                let frac = (t - p0.time) / dt;
+                v0 + frac * (v1 - v0)
+            } else {
+                v0
             }
         }
     }
@@ -572,32 +745,48 @@ pub fn extract_harmonics_resampled(
     let h3 = (p3 / p1).sqrt();
     let h5 = (p5 / p1).sqrt();
 
-    // Noise floor threshold: anything below 0.0001 (-80dB) is treated as true linear zero
-    let clean_h2 = if h2 > 0.0001 { h2.min(1.0) } else { 0.0 };
-    let clean_h3 = if h3 > 0.0001 { h3.min(1.0) } else { 0.0 };
-    let clean_h5 = if h5 > 0.0001 { h5.min(1.0) } else { 0.0 };
+    // Noise floor threshold: calibrated at 0.002 (-54 dB). Residual numerical noise below this is zeroed out.
+    let clean_h2 = if h2 > 0.002 { h2.min(1.0) } else { 0.0 };
+    let clean_h3 = if h3 > 0.002 { h3.min(1.0) } else { 0.0 };
+    let clean_h5 = if h5 > 0.002 { h5.min(1.0) } else { 0.0 };
 
     (clean_h2, clean_h3, clean_h5)
 }
 
-/// Calculate asymmetry index in [-1.0, 1.0] for a waveform
+/// Calculate asymmetry index in [-1.0, 1.0] for a waveform after subtracting DC mean
 fn calc_asymmetry(pts: &[&TranPoint]) -> f64 {
-    let v_pos = pts.iter().map(|p| p.v_out).fold(f64::NEG_INFINITY, f64::max);
-    let v_neg = pts.iter().map(|p| p.v_out).fold(f64::INFINITY, f64::min);
-    let span = v_pos.abs() + v_neg.abs();
+    if pts.is_empty() {
+        return 0.0;
+    }
+    let n = pts.len() as f64;
+    let v_dc: f64 = pts.iter().map(|p| p.v_out).sum::<f64>() / n;
+
+    let mut max_pos: f64 = 0.0;
+    let mut max_neg: f64 = 0.0;
+    for p in pts {
+        let v_ac = p.v_out - v_dc;
+        if v_ac > max_pos {
+            max_pos = v_ac;
+        }
+        if -v_ac > max_neg {
+            max_neg = -v_ac;
+        }
+    }
+
+    let span = max_pos + max_neg;
     if span > 0.01 {
-        ((v_pos - v_neg.abs()) / span).clamp(-1.0, 1.0)
+        ((max_pos - max_neg) / span).clamp(-1.0, 1.0)
     } else {
         0.0
     }
 }
 
-/// Extract non-linear features from small-signal (100mV) and large-signal (2V) transient data:
-/// 1. Asymmetry delta: |asym(2V) - asym(100mV)|
+/// Extract non-linear features from small-signal and large-signal transient data:
+/// 1. Asymmetry delta: |asym(large) - asym(small)|
 /// 2. H2 ratio (2nd harmonic / fundamental)
 /// 3. H3 ratio (3rd harmonic / fundamental)
 /// 4. H5 ratio (5th harmonic / fundamental)
-/// 5. Gain compression: 1.0 - (G_large / G_small)
+/// 5. Gain compression: 1.0 - (G_large / G_small) using actual measured V_in Vpp
 pub fn extract_nonlinear_features(
     small: &[TranPoint],
     large: &[TranPoint],
@@ -614,20 +803,36 @@ pub fn extract_nonlinear_features(
     let asym_large = calc_asymmetry(&steady_large);
     let asym_delta = (asym_large - asym_small).abs().clamp(0.0, 1.0);
 
-    // 2. Resampled Hann-windowed harmonic extraction on 2V drive (2 cycles: 3ms to 5ms)
+    // 2. Resampled Hann-windowed harmonic extraction on large drive (2 cycles: 3ms to 5ms, 512 samples)
     let (h2_ratio, h3_ratio, h5_ratio) =
-        extract_harmonics_resampled(large, 1000.0, 0.003, 2.0, 256);
+        extract_harmonics_resampled(large, 1000.0, 0.003, 2.0, 512);
 
-    // 3. Gain compression
+    // 3. Gain compression using actual v_in Vpp
     let v_pos_s = steady_small.iter().map(|p| p.v_out).fold(f64::NEG_INFINITY, f64::max);
     let v_neg_s = steady_small.iter().map(|p| p.v_out).fold(f64::INFINITY, f64::min);
-    let vpp_small = (v_pos_s - v_neg_s).max(0.0);
-    let g_small = vpp_small / 0.2; // 0.1V peak = 0.2Vpp
+    let vpp_small_out = (v_pos_s - v_neg_s).max(0.0);
+
+    let vin_pos_s = steady_small.iter().filter_map(|p| p.v_in).fold(f64::NEG_INFINITY, f64::max);
+    let vin_neg_s = steady_small.iter().filter_map(|p| p.v_in).fold(f64::INFINITY, f64::min);
+    let vpp_small_in = if vin_pos_s.is_finite() && vin_neg_s.is_finite() && (vin_pos_s - vin_neg_s) > 1e-4 {
+        vin_pos_s - vin_neg_s
+    } else {
+        0.2 // fallback if v_in is not recorded
+    };
+    let g_small = vpp_small_out / vpp_small_in.max(1e-6);
 
     let v_pos_l = steady_large.iter().map(|p| p.v_out).fold(f64::NEG_INFINITY, f64::max);
     let v_neg_l = steady_large.iter().map(|p| p.v_out).fold(f64::INFINITY, f64::min);
-    let vpp_large = (v_pos_l - v_neg_l).max(0.0);
-    let g_large = vpp_large / 4.0; // 2.0V peak = 4.0Vpp
+    let vpp_large_out = (v_pos_l - v_neg_l).max(0.0);
+
+    let vin_pos_l = steady_large.iter().filter_map(|p| p.v_in).fold(f64::NEG_INFINITY, f64::max);
+    let vin_neg_l = steady_large.iter().filter_map(|p| p.v_in).fold(f64::INFINITY, f64::min);
+    let vpp_large_in = if vin_pos_l.is_finite() && vin_neg_l.is_finite() && (vin_pos_l - vin_neg_l) > 1e-4 {
+        vin_pos_l - vin_neg_l
+    } else {
+        4.0 // fallback if v_in is not recorded
+    };
+    let g_large = vpp_large_out / vpp_large_in.max(1e-6);
 
     let compression = if g_small > 1e-3 {
         (1.0 - (g_large / g_small)).clamp(0.0, 1.0)
@@ -639,10 +844,13 @@ pub fn extract_nonlinear_features(
 }
 
 /// Extract autonomous dynamics: self-oscillation RMS voltage and frequency
+///
+/// Uses steady-state window t >= 5ms (after the 10us initial perturbation kick has decayed)
+/// and robust autocorrelation / Schmitt-trigger hysteresis to extract fundamental frequency.
 pub fn extract_oscillation_features(tran: &[TranPoint]) -> (f64, f64) {
     let steady_pts: Vec<&TranPoint> = tran.iter().filter(|p| p.time >= 0.005).collect();
 
-    if steady_pts.len() < 10 {
+    if steady_pts.len() < 20 {
         return (0.0, 0.0);
     }
 
@@ -655,27 +863,75 @@ pub fn extract_oscillation_features(tran: &[TranPoint]) -> (f64, f64) {
         / n;
     let v_rms = v_ac_var.sqrt();
 
+    // 20 mV threshold for true autonomous oscillation
     if v_rms < 0.02 {
         return (0.0, 0.0);
     }
 
     let osc_rms_norm = (v_rms / 5.0).clamp(0.0, 1.0);
 
-    let mut crossings = 0;
-    let mut prev_sign = steady_pts[0].v_out - v_dc >= 0.0;
-    for p in steady_pts.iter().skip(1) {
-        let curr_sign = p.v_out - v_dc >= 0.0;
-        if curr_sign != prev_sign {
-            crossings += 1;
-            prev_sign = curr_sign;
+    // Uniform resampling for autocorrelation (500 points from 5ms to 10ms, dt = 10us)
+    let num_samples = 500;
+    let t_start = 0.005;
+    let t_end = 0.010;
+    let dt = (t_end - t_start) / (num_samples as f64);
+    let mut v_ac = Vec::with_capacity(num_samples);
+    for i in 0..num_samples {
+        let t = t_start + (i as f64) * dt;
+        v_ac.push(interpolate_tran(tran, t) - v_dc);
+    }
+
+    // Autocorrelation to find fundamental period T0
+    let min_lag = 1;
+    let max_lag = num_samples / 2;
+    let mut r0 = 0.0;
+    for &v in &v_ac {
+        r0 += v * v;
+    }
+
+    let mut best_lag = 0;
+    let mut best_r = f64::NEG_INFINITY;
+    let mut found_trough = false;
+
+    if r0 > 1e-8 {
+        for lag in min_lag..max_lag {
+            let mut r = 0.0;
+            for i in 0..(num_samples - lag) {
+                r += v_ac[i] * v_ac[i + lag];
+            }
+            // First look for autocorrelation to drop below 0.5*r0 (trough)
+            if !found_trough {
+                if r < 0.5 * r0 {
+                    found_trough = true;
+                }
+            } else if r > best_r {
+                best_r = r;
+                best_lag = lag;
+            }
         }
     }
 
-    let t_start = steady_pts.first().unwrap().time;
-    let t_end = steady_pts.last().unwrap().time;
-    let t_span = (t_end - t_start).max(1e-4);
+    let freq = if best_lag > 0 && best_r > 0.3 * r0 {
+        1.0 / ((best_lag as f64) * dt)
+    } else {
+        // Fallback: Schmitt trigger zero crossings with hysteresis = 0.3 * v_rms
+        let hyst = 0.3 * v_rms;
+        let mut crossings = 0;
+        let mut state = steady_pts[0].v_out - v_dc >= 0.0;
+        for p in steady_pts.iter().skip(1) {
+            let v = p.v_out - v_dc;
+            if state && v < -hyst {
+                state = false;
+                crossings += 1;
+            } else if !state && v > hyst {
+                state = true;
+                crossings += 1;
+            }
+        }
+        let t_span = (steady_pts.last().unwrap().time - steady_pts.first().unwrap().time).max(1e-4);
+        (crossings as f64) / (2.0 * t_span)
+    };
 
-    let freq = (crossings as f64) / (2.0 * t_span);
     let osc_freq_norm = if freq > 1.0 {
         (freq.clamp(1.0, 100_000.0).log10() / 5.0).clamp(0.0, 1.0)
     } else {
@@ -707,6 +963,8 @@ pub struct ArchiveEntry {
     pub fitness: Option<f64>,
     #[serde(default)]
     pub obj_summary: Option<String>,
+    #[serde(default)]
+    pub is_hardware_verified: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -779,6 +1037,7 @@ impl NoveltyArchive {
                 generation,
                 fitness,
                 obj_summary,
+                is_hardware_verified: false,
             });
             return true;
         }
@@ -796,6 +1055,7 @@ impl NoveltyArchive {
                 generation,
                 fitness,
                 obj_summary,
+                is_hardware_verified: false,
             });
             true
         } else {
@@ -823,6 +1083,7 @@ impl NoveltyArchive {
 mod tests {
     use super::*;
     use crate::circuit::{Circuit, Component, NODE_GND, NODE_IN, NODE_OUT, NODE_VCC, NODE_VEE};
+    use crate::preset::{ProbeKind, ProbeTarget, TestCondition};
 
     /// Standard 1kHz Sallen-Key Lowpass Filter (R=10k, C=15.9nF)
     fn build_sallen_key_standard() -> Circuit {
@@ -914,10 +1175,10 @@ mod tests {
         assert_eq!(desc_diode[1], 0.0, "Diode clipper cutoff must be 0.0 (no saturation at 1.0)");
 
         // Verification of non-linear dimensions on Diode Clipper:
-        // asym_delta > 0.3
+        // asym_delta > 0.20
         assert!(
-            desc_diode[4] > 0.3,
-            "Diode clipper must have large asymmetry delta (> 0.3), got {:.4}",
+            desc_diode[4] > 0.20,
+            "Diode clipper must have large asymmetry delta (> 0.20), got {:.4}",
             desc_diode[4]
         );
         // H2 (even harmonic) > 0.1
@@ -1078,13 +1339,13 @@ mod tests {
     fn test_feasibility_gate_accepts_properly_biased_emitter_follower() {
         let mut c = Circuit::new();
         // Properly biased discrete NPN Emitter Follower:
-        // Base bias: R1 (VCC to base=10) 100k, R2 (base=10 to VEE) 100k -> Vb ≈ 0V
-        // Emitter resistor: Re (emitter=2 to VEE) 10k -> Ve ≈ -0.65V, Vbe ≈ 0.65V (ACTIVE!)
-        // Collector tied to VCC (+9V) -> Vce = 9 - (-0.65) = 9.65V (ACTIVE!)
+        // Base bias: R1 (VCC to base=10) 75k, R2 (base=10 to VEE) 100k -> Vb ≈ +0.87V
+        // Emitter resistor: Re (emitter=2 to VEE) 4.7k -> Ve ≈ +0.19V, Vbe ≈ 0.68V (ACTIVE!)
+        // Collector tied to VCC (+9V) -> Vce = 9 - 0.19 = 8.81V (ACTIVE!)
         // Input coupling: Cin (IN=1 to base=10) 1uF
         // Output taken from emitter=2 (NODE_OUT)
         c.add_component(Component::new('Q', 1, vec![NODE_VCC, 10, NODE_OUT], "2N3904").unwrap());
-        c.add_component(Component::new('R', 1, vec![NODE_VCC, 10], "100k").unwrap());
+        c.add_component(Component::new('R', 1, vec![NODE_VCC, 10], "75k").unwrap());
         c.add_component(Component::new('R', 2, vec![10, NODE_VEE], "100k").unwrap());
         c.add_component(Component::new('R', 3, vec![NODE_OUT, NODE_VEE], "4.7k").unwrap());
         c.add_component(Component::new('C', 1, vec![NODE_IN, 10], "1uF").unwrap());
@@ -1223,6 +1484,118 @@ mod tests {
         // Unbootstrapped Zin is limited to ~47k Ohm.
         // Bootstrapping boosts Zin > 600k Ohm (>12x improvement) even with 22pF stray capacitance!
         assert!(zin_val > 600_000.0, "Bootstrapped Zin should exceed 600k Ohm (12x higher than unbootstrapped 47k), got {:.1} Ohm", zin_val);
+    }
+
+    #[test]
+    fn test_calc_asymmetry_dc_offset_invariance() {
+        // Pure symmetrical sine wave with large 2.5V DC offset
+        let mut pure_sine_with_dc = Vec::new();
+        let dt = 1e-5;
+        for i in 0..500 {
+            let t = (i as f64) * dt;
+            let v_out = 2.5 + 0.5 * (2.0 * std::f64::consts::PI * 1000.0 * t).sin();
+            pure_sine_with_dc.push(TranPoint { time: t, v_out, v_in: Some(0.5 * (2.0 * std::f64::consts::PI * 1000.0 * t).sin()) });
+        }
+        let refs: Vec<&TranPoint> = pure_sine_with_dc.iter().collect();
+        let asym = calc_asymmetry(&refs);
+        println!("Symmetrical sine wave with 2.5V DC offset asymmetry: {:.6}", asym);
+        assert!(asym.abs() < 1e-3, "Symmetrical sine wave MUST have asymmetry ~ 0.0 regardless of DC offset, got {:.6}", asym);
+
+        // Asymmetric clipped wave (positive peak clipped at +0.2V relative to DC, negative swings to -1.0V)
+        let mut clipped_wave = Vec::new();
+        for i in 0..500 {
+            let t = (i as f64) * dt;
+            let raw_sin = (2.0 * std::f64::consts::PI * 1000.0 * t).sin();
+            let v_out = 2.5 + if raw_sin > 0.2 { 0.2 } else { raw_sin };
+            clipped_wave.push(TranPoint { time: t, v_out, v_in: Some(raw_sin) });
+        }
+        let refs_clipped: Vec<&TranPoint> = clipped_wave.iter().collect();
+        let asym_clipped = calc_asymmetry(&refs_clipped);
+        println!("Asymmetric clipped wave asymmetry: {:.6}", asym_clipped);
+        assert!(asym_clipped.abs() > 0.25, "Asymmetric clipped wave must have high asymmetry magnitude (> 0.25), got {:.6}", asym_clipped);
+    }
+
+    #[test]
+    fn test_ac_features_with_input_coupling_cap() {
+        // Build AC response mimicking discrete circuit with 1uF coupling cap:
+        // - 10 Hz: -14 dB (attenuated by input cap)
+        // - 100 Hz: -1 dB
+        // - 1 kHz to 100 kHz: flat 0.0 dB (wideband buffer)
+        let mut ac_points = Vec::new();
+        let freqs = [10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 5000.0, 10000.0, 50000.0, 100000.0];
+        for &f in &freqs {
+            // High-pass filter fc = 30 Hz: mag_db = 10 * log10( (f/30)^2 / (1 + (f/30)^2) )
+            let ratio: f64 = f / 30.0;
+            let mag_sq: f64 = ratio * ratio / (1.0 + ratio * ratio);
+            let mag_db: f64 = 10.0 * mag_sq.log10();
+            ac_points.push(AcPoint { freq: f, mag_db, phase_deg: 0.0 });
+        }
+
+        let (has_filter, cutoff_norm, rolloff_norm, peak_q_norm) = extract_ac_features(&ac_points);
+        println!("Coupling cap AC features: has_filter={:.2}, cutoff_norm={:.4}, rolloff={:.4}, peak_q={:.4}",
+            has_filter, cutoff_norm, rolloff_norm, peak_q_norm);
+
+        // Max magnitude is ~0 dB at 1kHz..100kHz.
+        // Lower cutoff at ~30 Hz is detected properly as high-pass!
+        assert_eq!(has_filter, 1.0, "High-pass behavior from coupling capacitor must be detected (has_filter=1.0)");
+        let fc = 10f64.powf(cutoff_norm * 5.0);
+        println!("Detected high-pass cutoff: {:.1} Hz", fc);
+        assert!((fc - 30.0).abs() < 10.0, "Cutoff should be ~30 Hz, got {:.1} Hz", fc);
+        assert_eq!(peak_q_norm, 0.0, "No false resonance peak Q should be detected for smooth highpass coupling");
+    }
+
+    #[test]
+    fn test_probe_ac_log_interpolation() {
+        let probe_ac = vec![
+            crate::spice::ProbeAcPoint { freq: 100.0, gain: 1.0, zin: 100_000.0, zout: 50.0 },
+            crate::spice::ProbeAcPoint { freq: 1000.0, gain: 2.0, zin: 10_000.0, zout: 500.0 },
+        ];
+        // Test exact log-midpoint: sqrt(100 * 1000) = 316.2277 Hz
+        let mid_freq = 316.227766;
+        let interp_gain = interpolate_probe(&probe_ac, mid_freq, |p| p.gain);
+        let interp_zin = interpolate_probe(&probe_ac, mid_freq, |p| p.zin);
+        println!("Interpolated at {:.1} Hz: gain={:.4}, zin={:.1}", mid_freq, interp_gain, interp_zin);
+
+        // Midpoint in log scale (log10(316.2277) = 2.5, midpoint between 2.0 and 3.0) should give exactly t = 0.5
+        assert!((interp_gain - 1.5).abs() < 0.01, "Interpolated gain at log midpoint should be 1.5, got {:.4}", interp_gain);
+        assert!((interp_zin - 55_000.0).abs() < 100.0, "Interpolated zin at log midpoint should be 55k, got {:.1}", interp_zin);
+    }
+
+    #[test]
+    fn test_per_probe_conditions_netlist() {
+        let seeds = crate::mutate::seed_discrete_population(1);
+        let circuit = &seeds[0];
+
+        let mut preset = Preset::buffer_default();
+        // Add a second probe with heavy 1k load and higher vin
+        preset.probes.push(ProbeTarget {
+            name: "GainHeavyLoad".to_string(),
+            probe_type: ProbeType::Gain,
+            condition: TestCondition {
+                freq: 1000.0,
+                vin: 0.5,
+                r_load: 1000.0,
+            },
+            kind: ProbeKind::Closeness,
+            want: 0.9,
+            soft: 0.4,
+            weight: 2.0,
+            is_required: false,
+        });
+
+        let netlist = to_probe_netlist(circuit, &preset, 0.0);
+        println!("Generated Multi-Condition Probe Netlist:\n{}", netlist);
+
+        // Verify alter commands for custom condition appear in control script
+        assert!(netlist.contains("alter @v_in[ac] = 0.5000"), "Netlist must alter vin for probe with vin=0.5");
+        assert!(netlist.contains("alter r_probe_load = 1000.00"), "Netlist must alter r_load for probe with r_load=1k");
+        assert!(netlist.contains("probe_ac_"), "Netlist must output indexed probe files for varying conditions");
+
+        // Run simulation and evaluate preset
+        let timeout = Duration::from_secs(5);
+        let obj_vec = evaluate_preset(circuit, &preset, 0.0, timeout).expect("Multi-condition evaluation must succeed");
+        assert_eq!(obj_vec.names.len(), preset.probes.len());
+        println!("Multi-condition evaluation results: {:?}", obj_vec.summary());
     }
 }
 

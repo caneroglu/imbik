@@ -1,0 +1,82 @@
+name = "sallen_key_10k"
+description = "10kHz 2nd-Order Sallen-Key Active Lowpass Filter (Op-Amp Hunting)"
+feasibility_max_dc = 0.50
+feasibility_rail_margin = 1.65
+allow_opamps = true
+
+# 1. Passband Gain Probe: Unity Gain (0 dB) deep in the passband at 1 kHz
+[[probes]]
+name = "Passband@1kHz"
+probe_type = "Gain"
+kind = "Closeness"
+want = 1.0
+soft = 0.80
+weight = 3.0
+require = true
+
+[probes.condition]
+freq = 1000.0
+vin = 0.1
+r_load = 10000.0
+
+# 2. Cutoff Frequency Probe: -3 dB attenuation (gain ≈ 0.707) at 10 kHz
+[[probes]]
+name = "Cutoff@10kHz"
+probe_type = "Gain"
+kind = "Closeness"
+want = 0.707
+soft = 0.10
+weight = 3.5
+require = false
+
+[probes.condition]
+freq = 10000.0
+vin = 0.1
+r_load = 10000.0
+
+# 3. Stopband Attenuation Probe: Strong attenuation (< 0.05 / -26 dB) at 50 kHz
+# Note: soft=1.05 provides continuous gradient from op-amp buffer (gain ~1.0) down to stopband
+[[probes]]
+name = "Stopband@50kHz"
+probe_type = "Gain"
+kind = "Lesser"
+want = 0.05
+soft = 1.05
+weight = 4.0
+require = false
+
+[probes.condition]
+freq = 50000.0
+vin = 0.1
+r_load = 10000.0
+
+# 4. DC Offset Probe: Near-zero DC offset at op-amp output (< 20mV ideal, < 500mV soft)
+[[probes]]
+name = "DcOffset"
+probe_type = "DcOffset"
+kind = "Lesser"
+want = 0.02
+soft = 0.50
+weight = 1.5
+require = false
+
+[probes.condition]
+freq = 0.0
+vin = 0.0
+r_load = 10000.0
+
+# 5. BOM Count Probe: Textbook Sallen-Key uses 5 components (1 Op-Amp + 2 R + 2 C)
+[[probes]]
+name = "BOM_Count"
+probe_type = "Bom"
+kind = "Lesser"
+want = 5.0
+soft = 12.0
+weight = 1.0
+require = false
+
+[probes.condition]
+freq = 0.0
+vin = 0.0
+r_load = 0.0
+

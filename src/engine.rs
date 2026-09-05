@@ -116,25 +116,28 @@ impl EvolutionEngine {
                 return;
             }
 
-            // Op-Amp Preset Mission Seeding: Op-Amp follower seed + passive bridge seed
+            // Op-Amp Preset Mission Seeding: Op-Amp follower seed + buffered follower with input resistor
             let mut op_seed = Circuit::new();
             op_seed.add_component(
                 Component::new('X', 1, vec![NODE_IN, NODE_OUT, NODE_VCC, NODE_VEE, NODE_OUT], "TL072").unwrap(),
             );
             let _ = op_seed.validate();
 
-            let mut pass_seed = Circuit::new();
-            pass_seed.add_component(Component::new('R', 1, vec![NODE_IN, NODE_OUT], "10k").unwrap());
-            let _ = pass_seed.validate();
+            let mut op_res_seed = Circuit::new();
+            op_res_seed.add_component(Component::new('R', 1, vec![NODE_IN, 10], "10k").unwrap());
+            op_res_seed.add_component(
+                Component::new('X', 1, vec![10, NODE_OUT, NODE_VCC, NODE_VEE, NODE_OUT], "TL072").unwrap(),
+            );
+            let _ = op_res_seed.validate();
 
             self.population.push(op_seed.clone());
-            self.population.push(pass_seed.clone());
+            self.population.push(op_res_seed.clone());
 
             while self.population.len() < self.config.population_size {
                 let base = if self.population.len() % 2 == 0 {
                     &op_seed
                 } else {
-                    &pass_seed
+                    &op_res_seed
                 };
                 self.population.push(mutate(base));
             }
@@ -311,75 +314,123 @@ impl EvolutionEngine {
                 let duration_ms = gen_start.elapsed().as_millis();
 
                 if let Some(best) = scored.first() {
-                    let obj_summary = best.objectives.as_ref().map(|o| o.summary()).unwrap_or_default();
+                    let best_obj_summary = best.objectives.as_ref().map(|o| o.summary()).unwrap_or_default();
                     println!(
                         "[Gen {:>2}] Eval: {:>2} | Rej: {:>2} (Gate: {:>2}, Val: {:>2}) | Scored: {:>2} | Uniq: {:>2} | Best: {:.6} | Time: {}ms | {}",
-                        gen_idx, total_eval, gate_rejected + val_rejected, gate_rejected, val_rejected, scored_count, unique_topologies, best.fitness_score, duration_ms, obj_summary
+                        gen_idx, total_eval, gate_rejected + val_rejected, gate_rejected, val_rejected, scored_count, unique_topologies, best.fitness_score, duration_ms, best_obj_summary
                     );
 
-                    // Archive the generation champion under its REAL measured behaviour.
-                    //
-                    // This used to stuff the scalar fitness into descriptor slot 0 and zero the
-                    // other ten. Everything downstream reads those slots as physics: the loot
-                    // table decoded `d[0] > 0.5` as "active filter with a 1 Hz cutoff", rarity
-                    // scoring found no functional behaviour and pinned every discovery to COMMON,
-                    // and the exported BOM/protocol printed that same fiction as build guidance.
-                    match extract_behavior_descriptor(&best.circuit, stray_pf, timeout) {
-                        Ok(desc) => {
-                            // Behavioural duplicate check first: Monte Carlo is ~20 extra SPICE
-                            // runs, so only pay for it on a champion that can actually enter.
+                    // Archive candidates:
+                    // 1. Champion is always considered first
+                    // 2. Additional slots select diverse high-performing candidates maximizing novelty
+                    let mut archived_in_gen = 0;
+                    let mut archive_candidates: Vec<&CandidateResult> = Vec::new();
+                    archive_candidates.push(best);
+
+                    // Identify high-performing candidates (>= 50% of champion fitness) with unique topologies
+                    let mut seen_archive_topos = std::collections::HashSet::new();
+                    seen_archive_topos.insert(best.circuit.to_netlist("SIG"));
+
+                    let min_viable_fitness = (best.fitness_score * 0.5).max(0.2);
+                    let mut diverse_pool = Vec::new();
+
+                    for cand in scored.iter().skip(1) {
+                        if cand.fitness_score < min_viable_fitness {
+                            break;
+                        }
+                        let sig = cand.circuit.to_netlist("SIG");
+                        if seen_archive_topos.insert(sig) {
+                            diverse_pool.push(cand);
+                            if diverse_pool.len() >= 6 {
+                                break;
+                            }
+                        }
+                    }
+
+                    // Score diverse pool by novelty distance to current archive
+                    let mut novelty_scored: Vec<(&CandidateResult, f64)> = Vec::new();
+                    for cand in diverse_pool {
+                        if let Ok(desc) = extract_behavior_descriptor(&cand.circuit, stray_pf, timeout) {
                             let nn_dist = self.archive.min_distance(&desc);
-                            let is_duplicate = !self.archive.is_empty()
-                                && nn_dist < self.config.min_novelty_dist;
+                            novelty_scored.push((cand, nn_dist));
+                        }
+                    }
 
-                            if !is_duplicate {
-                                let mc_dev_db = evaluate_monte_carlo(
-                                    &best.circuit,
-                                    self.config.monte_carlo_runs,
-                                    0.05,
-                                    stray_pf,
-                                    timeout,
-                                )
-                                .ok()
-                                .map(|rep| rep.max_deviation_db);
+                    // Sort by novelty distance descending (most novel first)
+                    novelty_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-                                let added = self.archive.maybe_add_with_meta(
-                                    best.circuit.clone(),
-                                    desc,
-                                    // Mission mode ranks by spec fitness, not novelty, so no
-                                    // k-NN threshold - but still refuse behavioural clones.
-                                    0.0,
-                                    self.config.k_neighbors,
-                                    self.config.min_novelty_dist,
-                                    mc_dev_db,
-                                    gen_idx,
-                                    Some(best.fitness_score),
-                                    Some(obj_summary),
-                                );
+                    for (cand, _) in novelty_scored.into_iter().take(2) {
+                        archive_candidates.push(cand);
+                    }
 
-                                if added {
-                                    let nn_report =
-                                        if nn_dist.is_finite() { nn_dist } else { 1.0 };
-                                    let rarity = evaluate_rarity(nn_report, mc_dev_db, &desc);
-                                    let mc_str = mc_dev_db
-                                        .map(|v| format!("{:.1}dB", v))
-                                        .unwrap_or_else(|| "--".to_string());
-                                    println!(
-                                        "  {} DROP  #{} | nn={:.3} mc={} | {}",
-                                        rarity.colored_label(),
-                                        self.archive.len() - 1,
-                                        nn_report,
-                                        mc_str,
-                                        describe_character(&desc)
+                    for cand in archive_candidates {
+                        if cand.fitness_score <= 0.0 || archived_in_gen >= 3 {
+                            break;
+                        }
+                        let cand_summary = cand.objectives.as_ref().map(|o| o.summary()).unwrap_or_default();
+                        match extract_behavior_descriptor(&cand.circuit, stray_pf, timeout) {
+                            Ok(desc) => {
+                                let nn_dist = self.archive.min_distance(&desc);
+                                let best_archived_fit = self.archive.entries.iter().filter_map(|e| e.fitness).fold(0.0, f64::max);
+                                let is_breakthrough = cand.fitness_score > best_archived_fit;
+                                let is_duplicate = !self.archive.is_empty()
+                                    && nn_dist < self.config.min_novelty_dist
+                                    && !is_breakthrough;
+
+                                if !is_duplicate {
+                                    let mc_dev_db = evaluate_monte_carlo(
+                                        &cand.circuit,
+                                        self.config.monte_carlo_runs,
+                                        0.05,
+                                        stray_pf,
+                                        timeout,
+                                    )
+                                    .ok()
+                                    .map(|rep| rep.max_deviation_db);
+
+                                    let effective_min_dist = if is_breakthrough { 0.0 } else { self.config.min_novelty_dist };
+                                    let added = self.archive.maybe_add_with_meta(
+                                        cand.circuit.clone(),
+                                        desc,
+                                        // Mission mode ranks by spec fitness, not novelty, so no
+                                        // k-NN threshold - but still refuse behavioural clones.
+                                        0.0,
+                                        self.config.k_neighbors,
+                                        effective_min_dist,
+                                        mc_dev_db,
+                                        gen_idx,
+                                        Some(cand.fitness_score),
+                                        Some(cand_summary),
+                                    );
+
+                                    if added {
+                                        archived_in_gen += 1;
+                                        let nn_report =
+                                            if nn_dist.is_finite() { nn_dist } else { 1.0 };
+                                        let rarity = evaluate_rarity(nn_report, mc_dev_db, &desc);
+                                        let mc_str = mc_dev_db
+                                            .map(|v| format!("{:.1}dB", v))
+                                            .unwrap_or_else(|| "--".to_string());
+                                        println!(
+                                            "  {} DROP  #{} | fit={:.4} | nn={:.3} mc={} | {}",
+                                            rarity.colored_label(),
+                                            self.archive.len() - 1,
+                                            cand.fitness_score,
+                                            nn_report,
+                                            mc_str,
+                                            describe_character(&desc)
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                if archived_in_gen == 0 && std::ptr::eq(cand, best) {
+                                    eprintln!(
+                                        "  [Gen {}] Champion characterization failed, not archived: {}",
+                                        gen_idx, e
                                     );
                                 }
                             }
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "  [Gen {}] Champion characterization failed, not archived: {}",
-                                gen_idx, e
-                            );
                         }
                     }
                 } else {

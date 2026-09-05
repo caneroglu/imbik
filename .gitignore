@@ -1,1 +1,20 @@
+# Rust build outputs
 /target
+
+# Discovery checkpoints and logs
+/checkpoints
+*.log
+*.cir
+
+# Bench export outputs and scratch experiments
+/bench
+/scratch
+*.svg
+
+# Python bytecode and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+
+# Antigravity system generated
+.system_generated/

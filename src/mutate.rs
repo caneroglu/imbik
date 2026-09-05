@@ -1,4 +1,4 @@
-use crate::circuit::{Circuit, Component, ComponentType, NODE_OUT, NODE_VCC, NODE_VEE};
+use crate::circuit::{Circuit, Component, ComponentType, NODE_GND, NODE_OUT, NODE_VCC, NODE_VEE};
 
 /// E24 standard resistor values from 10 Ohm to 1 MOhm
 pub const E24_VALUES: &[&str] = &[
@@ -66,14 +66,9 @@ fn next_node_id(circuit: &Circuit) -> usize {
     max_node.max(20) + 1
 }
 
-/// Collect non-power nodes suitable for general component connection
+/// Collect all nodes (including power rails and ground) suitable for component connection
 fn get_available_nodes(circuit: &Circuit) -> Vec<usize> {
-    circuit
-        .nodes
-        .iter()
-        .copied()
-        .filter(|&n| n != NODE_VCC && n != NODE_VEE)
-        .collect()
+    circuit.nodes.iter().copied().collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -99,27 +94,91 @@ pub fn mutate_change_value(circuit: &mut Circuit) -> bool {
     }
 
     let idx = indices[fastrand::usize(0..indices.len())];
-    let comp = &mut circuit.components[idx];
 
-    match comp.comp_type {
+    match circuit.components[idx].comp_type {
         ComponentType::R => {
-            comp.value = step_e24(&comp.value).to_string();
+            if fastrand::u8(0..100) < 15 {
+                // Type Morphing: Convert Resistor to Capacitor
+                circuit.components[idx].comp_type = ComponentType::C;
+                circuit.components[idx].value = E12_VALUES[fastrand::usize(0..E12_VALUES.len())].to_string();
+            } else {
+                circuit.components[idx].value = step_e24(&circuit.components[idx].value).to_string();
+            }
             true
         }
         ComponentType::C => {
-            comp.value = step_e12(&comp.value).to_string();
+            if fastrand::u8(0..100) < 15 {
+                // Type Morphing: Convert Capacitor to Resistor
+                circuit.components[idx].comp_type = ComponentType::R;
+                circuit.components[idx].value = E24_VALUES[fastrand::usize(0..E24_VALUES.len())].to_string();
+            } else {
+                circuit.components[idx].value = step_e12(&circuit.components[idx].value).to_string();
+            }
             true
         }
         ComponentType::Q => {
-            if comp.value.to_uppercase().contains("3904") {
-                comp.value = "2N3906".to_string();
+            let is_npn = circuit.components[idx].value.to_uppercase().contains("3904");
+            circuit.components[idx].value = if is_npn {
+                "2N3906".to_string()
             } else {
-                comp.value = "2N3904".to_string();
+                "2N3904".to_string()
+            };
+
+            // When toggling NPN <-> PNP:
+            // 1. Swap Collector (node 0) and Emitter (node 2).
+            //    In NPN, C is positive (towards VCC) and E is negative (towards VEE/GND).
+            //    In PNP, E is positive (towards VCC) and C is negative (towards VEE/GND).
+            //    Swapping nodes[0] and nodes[2] ensures the PNP emitter connects to the positive
+            //    branch (VCC or Rc) and collector connects to the negative branch (VEE or Re).
+            if circuit.components[idx].nodes.len() >= 3 {
+                circuit.components[idx].nodes.swap(0, 2);
+                let base_node = circuit.components[idx].nodes[1];
+
+                // 2. Base bias network polarity inversion:
+                // Find pull-up resistor to VCC and pull-down resistor to VEE/GND connected to base.
+                // Swap their values to invert the DC bias voltage across the midpoint.
+                let mut vcc_res_idx = None;
+                let mut vee_res_idx = None;
+
+                for (c_idx, c) in circuit.components.iter().enumerate() {
+                    if c_idx != idx && c.comp_type == ComponentType::R && c.nodes.len() == 2 {
+                        let connects_base = c.nodes[0] == base_node || c.nodes[1] == base_node;
+                        if connects_base {
+                            let other_node = if c.nodes[0] == base_node { c.nodes[1] } else { c.nodes[0] };
+                            if other_node == NODE_VCC {
+                                vcc_res_idx = Some(c_idx);
+                            } else if other_node == NODE_VEE || other_node == NODE_GND {
+                                vee_res_idx = Some(c_idx);
+                            }
+                        }
+                    }
+                }
+
+                if let (Some(r_vcc), Some(r_vee)) = (vcc_res_idx, vee_res_idx) {
+                    let temp_val = circuit.components[r_vcc].value.clone();
+                    circuit.components[r_vcc].value = circuit.components[r_vee].value.clone();
+                    circuit.components[r_vee].value = temp_val;
+                }
             }
             true
         }
         _ => false,
     }
+}
+
+/// Helper to pick two distinct nodes for 2-pin components, avoiding direct VCC-to-VEE shorts
+fn pick_two_nodes(nodes: &[usize]) -> Option<(usize, usize)> {
+    if nodes.len() < 2 {
+        return None;
+    }
+    for _ in 0..25 {
+        let u = nodes[fastrand::usize(0..nodes.len())];
+        let v = nodes[fastrand::usize(0..nodes.len())];
+        if u != v && !((u == NODE_VCC && v == NODE_VEE) || (u == NODE_VEE && v == NODE_VCC)) {
+            return Some((u, v));
+        }
+    }
+    None
 }
 
 /// Operator 2: Add a new component (R, C, D, Q, or X)
@@ -134,41 +193,32 @@ pub fn mutate_add_component(circuit: &mut Circuit) -> bool {
 
     if roll < 35 {
         // Add Resistor (35%)
-        let u = nodes[fastrand::usize(0..nodes.len())];
-        let mut v = nodes[fastrand::usize(0..nodes.len())];
-        while v == u {
-            v = nodes[fastrand::usize(0..nodes.len())];
-        }
-        let id = next_id(circuit, ComponentType::R);
-        let val = E24_VALUES[fastrand::usize(0..E24_VALUES.len())];
-        if let Ok(comp) = Component::new('R', id, vec![u, v], val) {
-            circuit.add_component(comp);
-            return true;
+        if let Some((u, v)) = pick_two_nodes(&nodes) {
+            let id = next_id(circuit, ComponentType::R);
+            let val = E24_VALUES[fastrand::usize(0..E24_VALUES.len())];
+            if let Ok(comp) = Component::new('R', id, vec![u, v], val) {
+                circuit.add_component(comp);
+                return true;
+            }
         }
     } else if roll < 65 {
         // Add Capacitor (30%)
-        let u = nodes[fastrand::usize(0..nodes.len())];
-        let mut v = nodes[fastrand::usize(0..nodes.len())];
-        while v == u {
-            v = nodes[fastrand::usize(0..nodes.len())];
-        }
-        let id = next_id(circuit, ComponentType::C);
-        let val = E12_VALUES[fastrand::usize(0..E12_VALUES.len())];
-        if let Ok(comp) = Component::new('C', id, vec![u, v], val) {
-            circuit.add_component(comp);
-            return true;
+        if let Some((u, v)) = pick_two_nodes(&nodes) {
+            let id = next_id(circuit, ComponentType::C);
+            let val = E12_VALUES[fastrand::usize(0..E12_VALUES.len())];
+            if let Ok(comp) = Component::new('C', id, vec![u, v], val) {
+                circuit.add_component(comp);
+                return true;
+            }
         }
     } else if roll < 75 {
         // Add Diode (10%)
-        let u = nodes[fastrand::usize(0..nodes.len())];
-        let mut v = nodes[fastrand::usize(0..nodes.len())];
-        while v == u {
-            v = nodes[fastrand::usize(0..nodes.len())];
-        }
-        let id = next_id(circuit, ComponentType::D);
-        if let Ok(comp) = Component::new('D', id, vec![u, v], "1N4148") {
-            circuit.add_component(comp);
-            return true;
+        if let Some((u, v)) = pick_two_nodes(&nodes) {
+            let id = next_id(circuit, ComponentType::D);
+            if let Ok(comp) = Component::new('D', id, vec![u, v], "1N4148") {
+                circuit.add_component(comp);
+                return true;
+            }
         }
     } else if roll < 95 || !has_opamp {
         // Add BJT Transistor (20% or 25% in discrete circuits)
@@ -285,8 +335,9 @@ pub fn mutate_move_terminal(circuit: &mut Circuit) -> bool {
             (c.comp_type == ComponentType::R
                 || c.comp_type == ComponentType::C
                 || c.comp_type == ComponentType::D
-                || c.comp_type == ComponentType::Q)
-                && (c.nodes.len() == 2 || c.nodes.len() == 3)
+                || c.comp_type == ComponentType::Q
+                || c.comp_type == ComponentType::X)
+                && (c.nodes.len() == 2 || c.nodes.len() == 3 || c.nodes.len() == 5)
         })
         .map(|(i, _)| i)
         .collect();
@@ -309,12 +360,19 @@ pub fn mutate_move_terminal(circuit: &mut Circuit) -> bool {
 
         let mut new_node = nodes[fastrand::usize(0..nodes.len())];
         let mut attempts = 0;
-        while new_node == other_terminal && attempts < 10 {
+        while (new_node == other_terminal
+            || (new_node == NODE_VCC && other_terminal == NODE_VEE)
+            || (new_node == NODE_VEE && other_terminal == NODE_VCC))
+            && attempts < 15
+        {
             new_node = nodes[fastrand::usize(0..nodes.len())];
             attempts += 1;
         }
 
-        if new_node == other_terminal {
+        if new_node == other_terminal
+            || (new_node == NODE_VCC && other_terminal == NODE_VEE)
+            || (new_node == NODE_VEE && other_terminal == NODE_VCC)
+        {
             return false;
         }
 
@@ -328,7 +386,7 @@ pub fn mutate_move_terminal(circuit: &mut Circuit) -> bool {
 
         let mut new_node = nodes[fastrand::usize(0..nodes.len())];
         let mut attempts = 0;
-        while (new_node == other_a || new_node == other_b) && attempts < 10 {
+        while (new_node == other_a || new_node == other_b) && attempts < 15 {
             new_node = nodes[fastrand::usize(0..nodes.len())];
             attempts += 1;
         }
@@ -340,6 +398,33 @@ pub fn mutate_move_terminal(circuit: &mut Circuit) -> bool {
         circuit.components[comp_idx].nodes[pin_to_move] = new_node;
         circuit.nodes.insert(new_node);
         return true;
+    } else if comp.nodes.len() == 5 && comp.comp_type == ComponentType::X {
+        // Op-Amp pin movement: can move non_inv (0), inv (1), or out (4)
+        // Power pins (2=VCC, 3=VEE) are preserved
+        let pin_to_move = match fastrand::u8(0..3) {
+            0 => 0, // non-inverting input
+            1 => 1, // inverting input
+            _ => 4, // output
+        };
+
+        // Pick an existing node or occasionally create a new node
+        let new_node = if fastrand::u8(0..10) < 3 {
+            next_node_id(circuit)
+        } else {
+            let mut cand = nodes[fastrand::usize(0..nodes.len())];
+            let mut attempts = 0;
+            while (cand == NODE_VCC || cand == NODE_VEE) && attempts < 10 {
+                cand = nodes[fastrand::usize(0..nodes.len())];
+                attempts += 1;
+            }
+            cand
+        };
+
+        if new_node != comp.nodes[pin_to_move] && new_node != NODE_VCC && new_node != NODE_VEE {
+            circuit.components[comp_idx].nodes[pin_to_move] = new_node;
+            circuit.nodes.insert(new_node);
+            return true;
+        }
     }
 
     false
@@ -914,6 +999,64 @@ mod tests {
         assert!(success, "mutate_add_bootstrap must succeed on standard discrete follower");
         assert_eq!(bjt_circuit.components.len(), initial_count + 2, "Bootstrap adds 1 isolation resistor and 1 bootstrap cap");
         assert!(bjt_circuit.validate().is_ok(), "Bootstrapped circuit must pass topological validation");
+    }
+
+    /// Test Q model toggle (NPN <-> PNP) preserves active forward bias
+    #[test]
+    fn test_q_toggle_preserves_active_bias() {
+        let seeds = seed_discrete_population(1);
+        let mut circuit = seeds[0].clone();
+
+        let q_idx = circuit.components.iter().position(|c| c.comp_type == ComponentType::Q).unwrap();
+        assert!(circuit.components[q_idx].value.contains("3904"));
+        let orig_c = circuit.components[q_idx].nodes[0];
+        let orig_e = circuit.components[q_idx].nodes[2];
+
+        // Find initial base bias resistors
+        let base_node = circuit.components[q_idx].nodes[1];
+        let mut initial_r_vcc = String::new();
+        let mut initial_r_vee = String::new();
+        for c in &circuit.components {
+            if c.comp_type == ComponentType::R && (c.nodes[0] == base_node || c.nodes[1] == base_node) {
+                let other = if c.nodes[0] == base_node { c.nodes[1] } else { c.nodes[0] };
+                if other == NODE_VCC {
+                    initial_r_vcc = c.value.clone();
+                } else if other == NODE_VEE || other == NODE_GND {
+                    initial_r_vee = c.value.clone();
+                }
+            }
+        }
+
+        // Toggle Q by running mutate_change_value until Q is selected
+        let mut toggled = false;
+        for _ in 0..100 {
+            let mut trial = circuit.clone();
+            if mutate_change_value(&mut trial) && trial.components[q_idx].value.contains("3906") {
+                circuit = trial;
+                toggled = true;
+                break;
+            }
+        }
+        assert!(toggled, "mutate_change_value must eventually toggle Q");
+
+        // Verify transistor value toggled to PNP
+        assert!(circuit.components[q_idx].value.contains("3906"));
+        // Verify C and E swapped
+        assert_eq!(circuit.components[q_idx].nodes[0], orig_e);
+        assert_eq!(circuit.components[q_idx].nodes[2], orig_c);
+
+        // Verify base bias resistors inverted
+        for c in &circuit.components {
+            if c.comp_type == ComponentType::R && (c.nodes[0] == base_node || c.nodes[1] == base_node) {
+                let other = if c.nodes[0] == base_node { c.nodes[1] } else { c.nodes[0] };
+                if other == NODE_VCC {
+                    assert_eq!(c.value, initial_r_vee);
+                } else if other == NODE_VEE || other == NODE_GND {
+                    assert_eq!(c.value, initial_r_vcc);
+                }
+            }
+        }
+        assert!(circuit.validate().is_ok());
     }
 }
 

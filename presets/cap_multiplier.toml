@@ -1,0 +1,97 @@
+name = "cap_multiplier"
+description = "Textbook Active Capacitance Multiplier (Synthetic 10uF Capacitor using 1 Op-Amp, Rl, C, R1)"
+feasibility_max_dc = 0.50
+feasibility_rail_margin = 1.65
+allow_opamps = true
+
+# 1. Low-Frequency Tracking Probe: Unity Gain (0 dB) at 10 Hz at op-amp output
+# (Required: circuit must actively drive the op-amp output to track input at low frequencies)
+[[probes]]
+name = "Passband@10Hz"
+probe_type = "Gain"
+kind = "Closeness"
+want = 1.0
+soft = 0.50
+weight = 4.0
+require = true
+
+[probes.condition]
+freq = 10.0
+vin = 0.1
+r_load = 10000.0
+
+# 2. Virtual Ground High-Frequency Probe: Op-amp output must attenuate (< 0.25) at 1 kHz
+# (Forces low-pass RC filter at non-inverting input, eliminating flat buffer cheats)
+[[probes]]
+name = "Stopband@1kHz"
+probe_type = "Gain"
+kind = "Lesser"
+want = 0.25
+soft = 1.01
+weight = 5.0
+require = false
+
+[probes.condition]
+freq = 1000.0
+vin = 0.1
+r_load = 10000.0
+
+# 3. Capacitive Zin Low-Frequency Probe: High input impedance (> 1.2 kOhm) at 10 Hz
+[[probes]]
+name = "Zin@10Hz"
+probe_type = "Zin"
+kind = "Greater"
+want = 1200.0
+soft = 300.0
+weight = 5.0
+require = false
+
+[probes.condition]
+freq = 10.0
+vin = 0.1
+r_load = 10000.0
+
+# 4. Capacitive Zin High-Frequency Probe: Low input impedance (< 150 Ohm) at 1 kHz
+[[probes]]
+name = "Zin@1kHz"
+probe_type = "Zin"
+kind = "Lesser"
+want = 150.0
+soft = 5000.0
+weight = 5.0
+require = false
+
+[probes.condition]
+freq = 1000.0
+vin = 0.1
+r_load = 10000.0
+
+# 5. DC Offset Probe: Stable DC bias (< 50mV ideal)
+[[probes]]
+name = "DcOffset"
+probe_type = "DcOffset"
+kind = "Lesser"
+want = 0.05
+soft = 0.50
+weight = 1.5
+require = false
+
+[probes.condition]
+freq = 0.0
+vin = 0.0
+r_load = 10000.0
+
+# 6. BOM Count Probe: Compact textbook topology uses 4 components (1 Op-Amp + 2 R + 1 C)
+[[probes]]
+name = "BOM_Count"
+probe_type = "Bom"
+kind = "Lesser"
+want = 4.0
+soft = 8.0
+weight = 1.0
+require = false
+
+[probes.condition]
+freq = 0.0
+vin = 0.0
+r_load = 0.0

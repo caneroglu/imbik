@@ -2,7 +2,44 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
+
+static SPICE_SEMAPHORE: (Mutex<usize>, Condvar) = (Mutex::new(0), Condvar::new());
+
+/// RAII Permit that limits the number of concurrent ngspice child processes system-wide.
+pub struct SpicePermit;
+
+impl SpicePermit {
+    pub fn acquire() -> Self {
+        let max_procs = std::env::var("IMBIK_MAX_SPICE_PROCS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or_else(|| {
+                std::thread::available_parallelism()
+                    .map(|p| p.get())
+                    .unwrap_or(4)
+                    .min(8)
+            });
+
+        let (lock, cvar) = &SPICE_SEMAPHORE;
+        let mut count = lock.lock().unwrap();
+        while *count >= max_procs {
+            count = cvar.wait(count).unwrap();
+        }
+        *count += 1;
+        SpicePermit
+    }
+}
+
+impl Drop for SpicePermit {
+    fn drop(&mut self) {
+        let (lock, cvar) = &SPICE_SEMAPHORE;
+        let mut count = lock.lock().unwrap();
+        *count = count.saturating_sub(1);
+        cvar.notify_one();
+    }
+}
 
 /// Single frequency point in AC small-signal response
 #[derive(Debug, Clone, PartialEq)]
@@ -20,12 +57,13 @@ pub struct TranPoint {
     pub v_in: Option<f64>,
 }
 
-/// Single frequency point in probe AC response (gain and input impedance)
+/// Single frequency point in probe AC response (gain, input impedance, output impedance)
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProbeAcPoint {
     pub freq: f64,
     pub gain: f64,
     pub zin: f64,
+    pub zout: f64,
 }
 
 /// Structured simulation output
@@ -35,8 +73,10 @@ pub struct SimulationResult {
     pub dc_nodes: HashMap<String, f64>,
     /// AC frequency response data (if .ac was run)
     pub ac_response: Option<Vec<AcPoint>>,
-    /// Probe AC response (gain and zin)
+    /// Probe AC response (gain and zin) - default/fallback
     pub probe_ac: Option<Vec<ProbeAcPoint>>,
+    /// Probe AC responses indexed by probe index (for per-probe custom vin/r_load conditions)
+    pub probe_ac_map: Option<HashMap<usize, Vec<ProbeAcPoint>>>,
     /// Transient waveform data (if .tran was run)
     pub tran_response: Option<Vec<TranPoint>>,
     /// Small-signal transient waveform (if tran_small.txt was produced)
@@ -74,6 +114,38 @@ impl From<std::io::Error> for SpiceError {
     }
 }
 
+/// Resolve the ngspice executable path from environment or default PATH
+pub fn get_ngspice_cmd() -> String {
+    if let Ok(p) = std::env::var("NGSPICE_PATH") {
+        if !p.trim().is_empty() {
+            return p.trim().to_string();
+        }
+    }
+    if let Ok(p) = std::env::var("IMBIK_NGSPICE") {
+        if !p.trim().is_empty() {
+            return p.trim().to_string();
+        }
+    }
+    "ngspice".to_string()
+}
+
+/// Check if ngspice simulation encountered non-convergence, singular matrix, or errors
+pub fn is_simulation_failed(status: &std::process::ExitStatus, log: &str) -> bool {
+    if !status.success() {
+        return true;
+    }
+    let lower = log.to_lowercase();
+    lower.contains("error:")
+        || lower.contains("simulation interrupted")
+        || lower.contains("singular matrix")
+        || lower.contains("matrix is singular")
+        || lower.contains("timestep too small")
+        || lower.contains("iteration limit reached")
+        || lower.contains("no convergence")
+        || lower.contains("fatal error")
+        || lower.contains("doanalyses:")
+}
+
 /// Run a SPICE netlist string through ngspice in batch mode with a timeout.
 pub fn run_simulation(netlist: &str, timeout: Duration) -> Result<SimulationResult, SpiceError> {
     let temp_dir = tempfile::Builder::new()
@@ -88,6 +160,7 @@ pub fn run_simulation(netlist: &str, timeout: Duration) -> Result<SimulationResu
     let tran_large_path = temp_dir.path().join("tran_large.txt");
     let tran_zero_path = temp_dir.path().join("tran_zero.txt");
     let probe_ac_path = temp_dir.path().join("probe_ac.txt");
+    let probe_zout_path = temp_dir.path().join("probe_zout.txt");
 
     fs::write(&circuit_path, netlist)?;
 
@@ -106,8 +179,12 @@ pub fn run_simulation(netlist: &str, timeout: Duration) -> Result<SimulationResu
         }
     }
 
+    // Acquire concurrency permit before spawning ngspice process
+    let _permit = SpicePermit::acquire();
+
     // Spawn ngspice in batch mode
-    let mut child = Command::new("ngspice")
+    let ngspice_bin = get_ngspice_cmd();
+    let mut child = Command::new(&ngspice_bin)
         .arg("-b")
         .arg("-o")
         .arg(&log_path)
@@ -115,7 +192,20 @@ pub fn run_simulation(netlist: &str, timeout: Duration) -> Result<SimulationResu
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .current_dir(temp_dir.path())
-        .spawn()?;
+        .spawn()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!(
+                        "ngspice binary '{}' not found in PATH or NGSPICE_PATH. Please install ngspice or set NGSPICE_PATH environment variable.",
+                        ngspice_bin
+                    ),
+                )
+            } else {
+                e
+            }
+        })?;
 
     let start = Instant::now();
     loop {
@@ -124,7 +214,7 @@ pub fn run_simulation(netlist: &str, timeout: Duration) -> Result<SimulationResu
                 let log_content = fs::read_to_string(&log_path).unwrap_or_default();
 
                 // Check for simulation error indicators in exit status or log content
-                if !status.success() || log_content.contains("Error:") || log_content.contains("Simulation interrupted") {
+                if is_simulation_failed(&status, &log_content) {
                     let err_summary = extract_error_summary(&log_content);
                     return Err(SpiceError::SubprocessFailed(err_summary));
                 }
@@ -174,16 +264,69 @@ pub fn run_simulation(netlist: &str, timeout: Duration) -> Result<SimulationResu
         None
     };
 
-    let probe_ac = if probe_ac_path.exists() {
-        Some(parse_probe_ac_data(&probe_ac_path)?)
+    let mut probe_ac = if probe_ac_path.exists() {
+        let mut pts = parse_probe_ac_data(&probe_ac_path)?;
+        if probe_zout_path.exists() {
+            if let Ok(content) = fs::read_to_string(&probe_zout_path) {
+                for (idx, line) in content.lines().enumerate() {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        if let Some(pt) = pts.get_mut(idx) {
+                            pt.zout = parts[1].parse::<f64>().unwrap_or(0.0);
+                        }
+                    }
+                }
+            }
+        }
+        Some(pts)
     } else {
         None
+    };
+
+    // Parse any per-probe custom sweeps: probe_ac_{i}.txt and probe_zout_{i}.txt
+    let mut probe_ac_map = HashMap::new();
+    if let Ok(entries) = fs::read_dir(temp_dir.path()) {
+        for entry in entries.flatten() {
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            if file_name.starts_with("probe_ac_") && file_name.ends_with(".txt") {
+                let idx_str = &file_name["probe_ac_".len()..file_name.len() - ".txt".len()];
+                if let Ok(idx) = idx_str.parse::<usize>() {
+                    if let Ok(mut pts) = parse_probe_ac_data(&entry.path()) {
+                        let zout_file = temp_dir.path().join(format!("probe_zout_{}.txt", idx));
+                        if zout_file.exists() {
+                            if let Ok(content) = fs::read_to_string(&zout_file) {
+                                for (l_idx, line) in content.lines().enumerate() {
+                                    let parts: Vec<&str> = line.split_whitespace().collect();
+                                    if parts.len() >= 2 {
+                                        if let Some(pt) = pts.get_mut(l_idx) {
+                                            pt.zout = parts[1].parse::<f64>().unwrap_or(0.0);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        probe_ac_map.insert(idx, pts);
+                    }
+                }
+            }
+        }
+    }
+
+    if probe_ac.is_none() && probe_ac_map.contains_key(&0) {
+        probe_ac = probe_ac_map.get(&0).cloned();
+    }
+
+    let probe_ac_map_opt = if probe_ac_map.is_empty() {
+        None
+    } else {
+        Some(probe_ac_map)
     };
 
     Ok(SimulationResult {
         dc_nodes,
         ac_response,
         probe_ac,
+        probe_ac_map: probe_ac_map_opt,
         tran_response,
         tran_small,
         tran_large,
@@ -370,11 +513,17 @@ pub fn parse_probe_ac_data(path: &Path) -> Result<Vec<ProbeAcPoint>, SpiceError>
 
     for line in content.lines() {
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 4 {
+        if parts.len() >= 6 {
             let freq = parts[0].parse::<f64>().unwrap_or(0.0);
             let gain = parts[1].parse::<f64>().unwrap_or(0.0);
             let zin = parts[3].parse::<f64>().unwrap_or(0.0);
-            points.push(ProbeAcPoint { freq, gain, zin });
+            let zout = parts[5].parse::<f64>().unwrap_or(0.0);
+            points.push(ProbeAcPoint { freq, gain, zin, zout });
+        } else if parts.len() >= 4 {
+            let freq = parts[0].parse::<f64>().unwrap_or(0.0);
+            let gain = parts[1].parse::<f64>().unwrap_or(0.0);
+            let zin = parts[3].parse::<f64>().unwrap_or(0.0);
+            points.push(ProbeAcPoint { freq, gain, zin, zout: 0.0 });
         }
     }
 
@@ -406,7 +555,11 @@ pub fn run_dc_operating_point(netlist: &str, timeout: Duration) -> Result<HashMa
         }
     }
 
-    let mut child = Command::new("ngspice")
+    // Acquire concurrency permit before spawning ngspice process
+    let _permit = SpicePermit::acquire();
+
+    let ngspice_bin = get_ngspice_cmd();
+    let mut child = Command::new(&ngspice_bin)
         .arg("-b")
         .arg("-o")
         .arg(&log_path)
@@ -414,14 +567,27 @@ pub fn run_dc_operating_point(netlist: &str, timeout: Duration) -> Result<HashMa
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .current_dir(temp_dir.path())
-        .spawn()?;
+        .spawn()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!(
+                        "ngspice binary '{}' not found in PATH or NGSPICE_PATH. Please install ngspice or set NGSPICE_PATH environment variable.",
+                        ngspice_bin
+                    ),
+                )
+            } else {
+                e
+            }
+        })?;
 
     let start = Instant::now();
     loop {
         match child.try_wait()? {
             Some(status) => {
                 let log_content = fs::read_to_string(&log_path).unwrap_or_default();
-                if !status.success() || log_content.contains("Error:") || log_content.contains("Simulation interrupted") {
+                if is_simulation_failed(&status, &log_content) {
                     return Err(SpiceError::SubprocessFailed(extract_error_summary(&log_content)));
                 }
                 break;

@@ -12,6 +12,7 @@ kind = "Closeness"
 want = 1.0
 soft = 0.5
 weight = 3.0
+require = true
 
 [probes.condition]
 freq = 1000.0
@@ -42,6 +43,7 @@ kind = "Lesser"
 want = 0.02
 soft = 0.80
 weight = 1.5
+require = true
 
 [probes.condition]
 freq = 0.0

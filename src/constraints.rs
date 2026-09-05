@@ -24,6 +24,17 @@ impl Default for ConstraintLimits {
     }
 }
 
+impl From<&crate::preset::Preset> for ConstraintLimits {
+    fn from(preset: &crate::preset::Preset) -> Self {
+        ConstraintLimits {
+            min_signal_mag_db: -60.0,
+            max_dc_offset_v: preset.feasibility_max_dc,
+            rail_margin_v: preset.feasibility_rail_margin,
+            max_phase_jump_deg: 120.0,
+        }
+    }
+}
+
 /// Telemetry counters for tracking candidate rejection distribution during search
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FilterStats {
@@ -289,10 +300,10 @@ mod tests {
     #[test]
     fn test_reject_dc_offset() {
         let mut c = Circuit::new();
-        // Bias network creating +1.8V DC offset on the output node
-        // Voltage divider from VCC (9V): 8k and 2k gives V_out = 9 * 2 / 10 = 1.8V
-        c.add_component(Component::new('R', 1, vec![NODE_VCC, NODE_OUT], "8k").unwrap());
-        c.add_component(Component::new('R', 2, vec![NODE_OUT, NODE_GND], "2k").unwrap());
+        // Bias network creating +4.5V DC offset on the output node
+        // Voltage divider from VCC (9V): 5k and 5k gives V_out = 9 * 5 / 10 = 4.5V (exceeds 2.0V limit)
+        c.add_component(Component::new('R', 1, vec![NODE_VCC, NODE_OUT], "5k").unwrap());
+        c.add_component(Component::new('R', 2, vec![NODE_OUT, NODE_GND], "5k").unwrap());
         // AC signal coupled into output via large capacitor so signal exists (-20dB)
         c.add_component(Component::new('C', 1, vec![NODE_IN, NODE_OUT], "10uF").unwrap());
 

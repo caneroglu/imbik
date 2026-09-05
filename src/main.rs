@@ -39,6 +39,7 @@ fn print_help() {
     println!("  imbik show <id> [checkpoint.json]          - Inspect details, netlist & pin map of a circuit");
     println!("  imbik draw <id> [out.svg] [checkpoint]     - Generate publication-quality AoE SchemDraw schematic");
     println!("  imbik bench <id> [out_dir] [checkpoint]    - Export breadboard BOM, protocol, CSV & schematic");
+    println!("  imbik ingest <scope.csv> [id] [checkpoint] - Ingest oscilloscope capture & verify physical reality");
     println!("  imbik evolve [--preset <name>] [gens]      - Launch mission-driven or novelty discovery engine");
     println!("  imbik help                                 - Show this help menu\n");
 }
@@ -199,6 +200,92 @@ fn main() {
             if let Err(e) = loot::draw_circuit_schematic(&cp_path, id, out_svg) {
                 eprintln!("Error generating schematic: {}", e);
                 std::process::exit(1);
+            }
+        }
+
+        "ingest" => {
+            if args.len() < 3 {
+                eprintln!("Usage: imbik ingest <scope_capture.csv> [circuit_id] [checkpoint_path]");
+                std::process::exit(1);
+            }
+
+            let scope_csv_path = PathBuf::from(&args[2]);
+            if !scope_csv_path.exists() {
+                eprintln!("Error: Oscilloscope capture file not found: {:?}", scope_csv_path);
+                std::process::exit(1);
+            }
+
+            let circuit_id: usize = if args.len() >= 4 {
+                args[3].parse().unwrap_or(0)
+            } else {
+                0
+            };
+
+            let cp_path = if args.len() >= 5 {
+                PathBuf::from(&args[4])
+            } else {
+                find_default_checkpoint()
+            };
+
+            if !cp_path.exists() {
+                eprintln!("Error: Checkpoint file not found: {:?}", cp_path);
+                std::process::exit(1);
+            }
+
+            // Find reference.csv either in bench/circuit_{id}/reference.csv or generate it
+            let candidate_ref = PathBuf::from(format!("bench/circuit_{:02}/reference.csv", circuit_id));
+            let _temp_guard = tempfile::Builder::new().prefix("imbik_ingest_bench_").tempdir().ok();
+            let ref_csv_path = if candidate_ref.exists() {
+                candidate_ref
+            } else if let Some(ref td) = _temp_guard {
+                let _ = loot::export_bench_from_checkpoint(&cp_path, circuit_id, Some(td.path()));
+                td.path().join("reference.csv")
+            } else {
+                eprintln!("Error creating temp dir for reference extraction");
+                std::process::exit(1);
+            };
+
+            if !ref_csv_path.exists() {
+                eprintln!("Error: Reference simulation data not found at {:?}", ref_csv_path);
+                std::process::exit(1);
+            }
+
+            println!("\n============================================================");
+            println!("  🔬 Physical Hardware Verification & Oscilloscope Ingest    ");
+            println!("============================================================");
+            println!("Scope Capture:     {:?}", scope_csv_path);
+            println!("SPICE Reference:   {:?}", ref_csv_path);
+            println!("Target Circuit ID: #{}", circuit_id);
+
+            match bench::ingest_scope_data(&scope_csv_path, &ref_csv_path) {
+                Ok(res) => {
+                    println!("\n{}", res.details);
+                    if res.is_verified {
+                        println!("\n🏆 SUCCESS: Measured oscilloscope waveforms match SPICE reality with r = {:.4}!", res.pearson_r);
+                        println!("🎉 Circuit #{} is now HARDWARE VERIFIED! Rarity upgraded to LEGENDARY!", circuit_id);
+
+                        // Update checkpoint with is_hardware_verified = true
+                        if let Ok(content) = std::fs::read_to_string(&cp_path) {
+                            if let Ok(mut cp) = serde_json::from_str::<engine::CheckpointData>(&content) {
+                                if let Some(entry) = cp.archive.entries.get_mut(circuit_id) {
+                                    entry.is_hardware_verified = true;
+                                    if let Ok(updated_json) = serde_json::to_string_pretty(&cp) {
+                                        let _ = std::fs::write(&cp_path, updated_json);
+                                        println!("Saved updated hardware-verified status to {:?}", cp_path);
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        println!("\n⚠️ WARNING: Deviation between physical hardware and SPICE simulation!");
+                        println!("   Pearson r: {:.4} (need >= 0.85), NRMSE: {:.4} (need <= 0.35)", res.pearson_r, res.nrmse);
+                        println!("   Check breadboard component tolerances, rail voltages, and grounding.");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Ingest analysis failed: {}", e);
+                    std::process::exit(1);
+                }
             }
         }
 

@@ -1,6 +1,7 @@
 use crate::circuit::{Circuit, ComponentType, NODE_GND, NODE_IN, NODE_OUT, NODE_VCC, NODE_VEE};
 use crate::fitness::{to_characterization_netlist, BehaviorDescriptor};
 use crate::spice::{run_simulation, AcPoint, SpiceError, TranPoint};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -277,19 +278,48 @@ pub fn generate_protocol(circuit: &Circuit, descriptor: &BehaviorDescriptor) -> 
     doc.push_str("   - **VCC (Node 3) to GND (Node 0)**: Must be `> 10 kΩ` (No short).\n");
     doc.push_str("   - **VEE (Node 4) to GND (Node 0)**: Must be `> 10 kΩ` (No short).\n");
     doc.push_str("   - **VCC (Node 3) to VEE (Node 4)**: Must be `> 20 kΩ` (No short).\n");
-    doc.push_str("4. Inspect TL072 chip orientation: Pin 1 notch must align with your breadboard layout.\n");
-    doc.push_str("5. Inspect 1N4148 diodes: Ensure the black cathode stripe matches the BOM diagram.\n\n");
+
+    let has_bjts = circuit.components.iter().any(|c| c.comp_type == ComponentType::Q);
+    let has_opamps = circuit.components.iter().any(|c| c.comp_type == ComponentType::X);
+    let has_diodes = circuit.components.iter().any(|c| c.comp_type == ComponentType::D);
+
+    let mut step_num = 4;
+    if has_bjts {
+        doc.push_str(&format!("{}. Inspect BJT transistor pinout (2N3904 / 2N3906 TO-92: E-B-C looking at flat front with leads pointing down): Ensure Collector, Base, and Emitter match schematic connections.\n", step_num));
+        step_num += 1;
+    }
+    if has_opamps {
+        doc.push_str(&format!("{}. Inspect TL072 op-amp orientation: Pin 1 notch/dot must align with your breadboard layout.\n", step_num));
+        step_num += 1;
+    }
+    if has_diodes {
+        doc.push_str(&format!("{}. Inspect 1N4148 diodes: Ensure the black cathode stripe matches the BOM diagram.\n", step_num));
+    }
+    doc.push_str("\n");
 
     // Step 2
     doc.push_str("## Step 2: DC Power-On & Quiescent Bias Verification\n");
     doc.push_str(&format!("1. Turn on the dual supply (+{:.1}V and -{:.1}V).\n", circuit.vcc, circuit.vee.abs()));
-    doc.push_str("2. Observe total supply current: Normal quiescent current is **2.5 mA to 5.0 mA** per TL072 package. If current exceeds 20mA, shut off immediately and check wiring!\n");
+    let normal_current = if has_opamps {
+        "2.5 mA to 5.0 mA per TL072 package"
+    } else if has_bjts {
+        "1.0 mA to 10.0 mA depending on bias divider resistors"
+    } else {
+        "< 5.0 mA"
+    };
+    doc.push_str(&format!("2. Observe total supply current: Normal quiescent current is **{}**. If current exceeds 25mA, shut off immediately and check wiring for shorts!\n", normal_current));
     doc.push_str("3. Set DMM to DC Volts mode. Ground the black lead to Node 0 (GND).\n");
     doc.push_str("4. Measure DC voltages at key nodes:\n");
     doc.push_str(&format!("   - **Node 3 (VCC)**: `+{:.1}V ± 0.3V`\n", circuit.vcc));
     doc.push_str(&format!("   - **Node 4 (VEE)**: `-{:.1}V ± 0.3V`\n", circuit.vee.abs()));
     doc.push_str("   - **Node 2 (OUT)**: Must be between `-1.5V` and `+1.5V` (expected near 0.0V DC).\n");
-    doc.push_str("   - *If Node 2 is pinned to +7.5V or -7.5V, the op-amp is saturated to the rail. Double check negative feedback connections!*\n\n");
+    if has_opamps {
+        doc.push_str("   - *If Node 2 is pinned to rails (±7.5V), the op-amp is saturated. Check feedback network and inverting input wiring.*\n\n");
+    } else if has_bjts {
+        doc.push_str("   - *If Node 2 is pinned to rails, the BJT is in saturation or cutoff. Verify base bias divider resistors and emitter pull-down/pull-up.*\n\n");
+    } else {
+        doc.push_str("   - *If Node 2 is pinned to rails, verify rail connections and load termination.*\n\n");
+    }
 
     // Step 3
     doc.push_str("## Step 3: Small-Signal Linear Response (100mV peak / 200mVpp, 1kHz)\n");
@@ -364,9 +394,9 @@ pub fn generate_reference_csv(
     for i in 0..=num_samples {
         let t = t_start + (i as f64) * dt;
         let v_out_s = crate::fitness::interpolate_tran(tran_small, t);
-        let v_in_s = 0.1 * (2.0 * std::f64::consts::PI * 1000.0 * t).sin();
+        let v_in_s = crate::fitness::interpolate_tran_in(tran_small, t);
         let v_out_l = crate::fitness::interpolate_tran(tran_large, t);
-        let v_in_l = 2.0 * (2.0 * std::f64::consts::PI * 1000.0 * t).sin();
+        let v_in_l = crate::fitness::interpolate_tran_in(tran_large, t);
 
         csv.push_str(&format!(
             "{:.6e},{:.6e},{:.6e},{:.6e},{:.6e}\n",
@@ -461,6 +491,126 @@ pub fn generate_bench_package(
     })
 }
 
+/// Ingest analysis report comparing physical oscilloscope CSV against SPICE reference
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IngestResult {
+    pub num_samples: usize,
+    pub pearson_r: f64,
+    pub nrmse: f64,
+    pub is_verified: bool,
+    pub details: String,
+}
+
+/// Ingest physical oscilloscope capture CSV and compare against SPICE reference.
+/// Supports standard oscilloscope CSV formats (time, ch1_in, ch2_out or time, ch2_out).
+pub fn ingest_scope_data(
+    scope_csv_path: &Path,
+    ref_csv_path: &Path,
+) -> Result<IngestResult, BenchError> {
+    let scope_content = fs::read_to_string(scope_csv_path)
+        .map_err(|e| BenchError::MissingSimulationData(format!("Could not read scope capture file: {}", e)))?;
+    let ref_content = fs::read_to_string(ref_csv_path)
+        .map_err(|e| BenchError::MissingSimulationData(format!("Could not read reference CSV: {}", e)))?;
+
+    // Parse reference large-signal output points (time, v_out_large)
+    let mut ref_times = Vec::new();
+    let mut ref_vouts = Vec::new();
+    for line in ref_content.lines().skip(1) {
+        let parts: Vec<&str> = line.split(',').collect();
+        if parts.len() >= 5 {
+            if let (Ok(t), Ok(v)) = (parts[0].parse::<f64>(), parts[4].parse::<f64>()) {
+                ref_times.push(t);
+                ref_vouts.push(v);
+            }
+        }
+    }
+
+    if ref_times.is_empty() {
+        return Err(BenchError::MissingSimulationData("Reference CSV has no valid data points".to_string()));
+    }
+
+    // Parse scope data
+    let mut scope_vouts = Vec::new();
+    let mut scope_times = Vec::new();
+    for line in scope_content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("time") || trimmed.starts_with("Time") || trimmed.starts_with('x') || trimmed.starts_with('X') {
+            continue;
+        }
+        let parts: Vec<&str> = trimmed.split([',', '\t', ' ']).filter(|s| !s.is_empty()).collect();
+        if parts.len() >= 2 {
+            if let (Ok(t), Ok(v)) = (parts[0].parse::<f64>(), parts[parts.len() - 1].parse::<f64>()) {
+                scope_times.push(t);
+                scope_vouts.push(v);
+            }
+        }
+    }
+
+    if scope_vouts.len() < 10 {
+        return Err(BenchError::MissingSimulationData(format!(
+            "Scope capture CSV has insufficient valid sample rows (got {}, need >= 10)",
+            scope_vouts.len()
+        )));
+    }
+
+    // Resample / interpolate reference onto scope time grid or compare normalized peaks
+    let n = scope_vouts.len();
+    let mean_scope: f64 = scope_vouts.iter().sum::<f64>() / (n as f64);
+    let min_scope = scope_vouts.iter().copied().fold(f64::INFINITY, f64::min);
+    let max_scope = scope_vouts.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let span_scope = (max_scope - min_scope).max(1e-6);
+
+    let min_ref = ref_vouts.iter().copied().fold(f64::INFINITY, f64::min);
+    let max_ref = ref_vouts.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let span_ref = (max_ref - min_ref).max(1e-6);
+
+    // Compute Pearson correlation across resampled matching cycles
+    let mut s_scope = 0.0;
+    let mut s_ref = 0.0;
+    let mut s_prod = 0.0;
+    let mut sq_diff_sum = 0.0;
+
+    let eval_samples = 128;
+    for i in 0..eval_samples {
+        let frac = (i as f64) / (eval_samples as f64);
+        let idx_s = ((frac * (scope_vouts.len() as f64)) as usize).min(scope_vouts.len() - 1);
+        let idx_r = ((frac * (ref_vouts.len() as f64)) as usize).min(ref_vouts.len() - 1);
+
+        let norm_s = (scope_vouts[idx_s] - mean_scope) / span_scope;
+        let norm_r = (ref_vouts[idx_r] - (min_ref + span_ref / 2.0)) / span_ref;
+
+        s_scope += norm_s * norm_s;
+        s_ref += norm_r * norm_r;
+        s_prod += norm_s * norm_r;
+
+        let diff = norm_s - norm_r;
+        sq_diff_sum += diff * diff;
+    }
+
+    let pearson_r = if s_scope > 1e-9 && s_ref > 1e-9 {
+        (s_prod / (s_scope.sqrt() * s_ref.sqrt())).clamp(-1.0, 1.0)
+    } else {
+        0.0
+    };
+
+    let nrmse = (sq_diff_sum / (eval_samples as f64)).sqrt();
+    let is_verified = pearson_r >= 0.85 && nrmse <= 0.35;
+
+    let details = format!(
+        "Ingest Analysis: Pearson r = {:.4}, NRMSE = {:.4}, Samples = {}. Status: {}",
+        pearson_r, nrmse, scope_vouts.len(),
+        if is_verified { "HARDWARE VERIFIED (LEGENDARY MATCH)" } else { "DEVIATION DETECTED" }
+    );
+
+    Ok(IngestResult {
+        num_samples: scope_vouts.len(),
+        pearson_r,
+        nrmse,
+        is_verified,
+        details,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -521,5 +671,37 @@ mod tests {
         assert!(ac_lines.len() >= 50, "reference_ac.csv must have >= 50 points, got {}", ac_lines.len());
 
         println!("Bench Package test passed! Directory: {:?}", report.output_dir);
+    }
+
+    #[test]
+    fn test_ingest_scope_data_validation() {
+        let temp_dir = tempfile::Builder::new().prefix("imbik_test_ingest_").tempdir().unwrap();
+        let ref_csv_path = temp_dir.path().join("reference.csv");
+        let scope_csv_path = temp_dir.path().join("scope_capture.csv");
+
+        // Write synthetic reference CSV
+        let mut ref_content = String::from("time_s,v_in_small_v,v_out_small_v,v_in_large_v,v_out_large_v\n");
+        for i in 0..100 {
+            let t = 0.003 + (i as f64) * 0.00002;
+            let v_out = 1.5 * (2.0 * std::f64::consts::PI * 1000.0 * t).sin();
+            ref_content.push_str(&format!("{:.6e},0.0,0.0,0.0,{:.6e}\n", t, v_out));
+        }
+        fs::write(&ref_csv_path, ref_content).unwrap();
+
+        // Write matching synthetic oscilloscope CSV (with minor 2% noise)
+        let mut scope_content = String::from("Time,Channel2\n");
+        for i in 0..100 {
+            let t = 0.003 + (i as f64) * 0.00002;
+            let v_out = 1.48 * (2.0 * std::f64::consts::PI * 1000.0 * t).sin() + 0.01;
+            scope_content.push_str(&format!("{:.6e},{:.6e}\n", t, v_out));
+        }
+        fs::write(&scope_csv_path, scope_content).unwrap();
+
+        let ingest_res = ingest_scope_data(&scope_csv_path, &ref_csv_path).expect("Ingest analysis failed");
+        println!("Ingest result: {:?}", ingest_res);
+
+        assert!(ingest_res.is_verified, "Matching scope capture must verify as hardware-confirmed");
+        assert!(ingest_res.pearson_r > 0.95, "Pearson r should be > 0.95, got {:.4}", ingest_res.pearson_r);
+        assert!(ingest_res.nrmse < 0.15, "NRMSE should be low, got {:.4}", ingest_res.nrmse);
     }
 }
