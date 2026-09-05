@@ -1,9 +1,10 @@
 use crate::circuit::{Circuit, Component, NODE_GND, NODE_IN, NODE_OUT, NODE_VCC, NODE_VEE};
 use crate::constraints::check;
 use crate::fitness::{
-    evaluate_preset, extract_ac_features, extract_nonlinear_features, extract_oscillation_features,
-    to_characterization_netlist, BehaviorDescriptor, NoveltyArchive,
+    evaluate_preset, extract_ac_features, extract_behavior_descriptor, extract_nonlinear_features,
+    extract_oscillation_features, to_characterization_netlist, BehaviorDescriptor, NoveltyArchive,
 };
+use crate::loot::{describe_character, evaluate_rarity};
 use crate::mutate::mutate;
 use crate::preset::{ObjectiveVector, Preset};
 use crate::realism::evaluate_monte_carlo;
@@ -316,19 +317,71 @@ impl EvolutionEngine {
                         gen_idx, total_eval, gate_rejected + val_rejected, gate_rejected, val_rejected, scored_count, unique_topologies, best.fitness_score, duration_ms, obj_summary
                     );
 
-                    // Add top performer to archive with generation and fitness metadata
-                    let desc: BehaviorDescriptor = [best.fitness_score, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-                    self.archive.maybe_add_with_meta(
-                        best.circuit.clone(),
-                        desc,
-                        0.01,
-                        1,
-                        0.001,
-                        None,
-                        gen_idx,
-                        Some(best.fitness_score),
-                        Some(obj_summary),
-                    );
+                    // Archive the generation champion under its REAL measured behaviour.
+                    //
+                    // This used to stuff the scalar fitness into descriptor slot 0 and zero the
+                    // other ten. Everything downstream reads those slots as physics: the loot
+                    // table decoded `d[0] > 0.5` as "active filter with a 1 Hz cutoff", rarity
+                    // scoring found no functional behaviour and pinned every discovery to COMMON,
+                    // and the exported BOM/protocol printed that same fiction as build guidance.
+                    match extract_behavior_descriptor(&best.circuit, stray_pf, timeout) {
+                        Ok(desc) => {
+                            // Behavioural duplicate check first: Monte Carlo is ~20 extra SPICE
+                            // runs, so only pay for it on a champion that can actually enter.
+                            let nn_dist = self.archive.min_distance(&desc);
+                            let is_duplicate = !self.archive.is_empty()
+                                && nn_dist < self.config.min_novelty_dist;
+
+                            if !is_duplicate {
+                                let mc_dev_db = evaluate_monte_carlo(
+                                    &best.circuit,
+                                    self.config.monte_carlo_runs,
+                                    0.05,
+                                    stray_pf,
+                                    timeout,
+                                )
+                                .ok()
+                                .map(|rep| rep.max_deviation_db);
+
+                                let added = self.archive.maybe_add_with_meta(
+                                    best.circuit.clone(),
+                                    desc,
+                                    // Mission mode ranks by spec fitness, not novelty, so no
+                                    // k-NN threshold - but still refuse behavioural clones.
+                                    0.0,
+                                    self.config.k_neighbors,
+                                    self.config.min_novelty_dist,
+                                    mc_dev_db,
+                                    gen_idx,
+                                    Some(best.fitness_score),
+                                    Some(obj_summary),
+                                );
+
+                                if added {
+                                    let nn_report =
+                                        if nn_dist.is_finite() { nn_dist } else { 1.0 };
+                                    let rarity = evaluate_rarity(nn_report, mc_dev_db, &desc);
+                                    let mc_str = mc_dev_db
+                                        .map(|v| format!("{:.1}dB", v))
+                                        .unwrap_or_else(|| "--".to_string());
+                                    println!(
+                                        "  {} DROP  #{} | nn={:.3} mc={} | {}",
+                                        rarity.colored_label(),
+                                        self.archive.len() - 1,
+                                        nn_report,
+                                        mc_str,
+                                        describe_character(&desc)
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "  [Gen {}] Champion characterization failed, not archived: {}",
+                                gen_idx, e
+                            );
+                        }
+                    }
                 } else {
                     println!(
                         "[Gen {:>2}] Eval: {:>2} | Rej: {:>2} (Gate: {:>2}, Val: {:>2}) | Scored:  0 | Feasibility Gate dropped all candidates | Time: {}ms",

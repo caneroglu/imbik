@@ -2,6 +2,7 @@ use crate::circuit::{Circuit, ComponentType, NODE_GND, NODE_IN, NODE_OUT, NODE_V
 use crate::preset::{ObjectiveVector, Preset, ProbeType};
 use crate::spice::{run_dc_operating_point, run_simulation, AcPoint, SpiceError, TranPoint};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::time::Duration;
 
 pub const DESCRIPTOR_DIM: usize = 11;
@@ -18,6 +19,7 @@ pub enum FitnessError {
     FeasibilityDcOffset(f64),
     FeasibilityBjtCutoff(String),
     FeasibilityBjtSaturation(String),
+    MissingNodeVoltage(usize),
 }
 
 impl std::fmt::Display for FitnessError {
@@ -40,6 +42,11 @@ impl std::fmt::Display for FitnessError {
             FitnessError::FeasibilityBjtSaturation(msg) => {
                 write!(f, "Feasibility failed: BJT in saturation: {}", msg)
             }
+            FitnessError::MissingNodeVoltage(node) => write!(
+                f,
+                "Operating point did not report a voltage for node {} - cannot judge feasibility",
+                node
+            ),
         }
     }
 }
@@ -50,6 +57,31 @@ impl From<SpiceError> for FitnessError {
     fn from(err: SpiceError) -> Self {
         FitnessError::Spice(err)
     }
+}
+
+/// Look up a DC node voltage from an `.op` dump.
+///
+/// Ground is the reference and is never printed by ngspice, so node 0 resolves to an
+/// exact 0.0 V. Every other node MUST be present: these lookups previously fell back to
+/// `unwrap_or(0.0)`, which meant a circuit whose operating point failed to print sailed
+/// through the feasibility gate looking perfectly biased (0 V output, 0 V on every BJT
+/// terminal). A missing node is now a hard rejection.
+fn dc_node_voltage(dc_nodes: &HashMap<String, f64>, node: usize) -> Result<f64, FitnessError> {
+    if node == NODE_GND {
+        return Ok(0.0);
+    }
+    dc_nodes
+        .get(&node.to_string())
+        .or_else(|| dc_nodes.get(&format!("v({})", node)))
+        .or_else(|| match node {
+            NODE_IN => dc_nodes.get("in"),
+            NODE_OUT => dc_nodes.get("out"),
+            NODE_VCC => dc_nodes.get("vcc"),
+            NODE_VEE => dc_nodes.get("vee"),
+            _ => None,
+        })
+        .copied()
+        .ok_or(FitnessError::MissingNodeVoltage(node))
 }
 
 /// Generate comprehensive characterization SPICE netlist:
@@ -118,11 +150,12 @@ pub fn to_characterization_netlist(circuit: &Circuit, title: &str, stray_cap_pf:
     netlist
 }
 
+/// Re-export of the crate-wide canonical SPICE preamble.
+///
+/// Thin wrapper so existing call sites in this module keep working; the model
+/// definitions live in exactly one place: `circuit::standard_spice_headers`.
 pub fn standard_spice_headers() -> &'static str {
-    ".include \"tl072.sub\"\n\
-     .model 1N4148 D(is=2.52n rs=0.568 n=1.752 cjo=4p m=0.4 tt=20n)\n\
-     .model 2N3904 NPN(Is=6.734f Xti=3 Eg=1.11 Vaf=74.03 Bf=416.4 Ne=1.259 Ise=6.734f Ikf=66.78m Xtb=1.5 Br=.7371 Nc=2 Isc=0 Ikr=0 Rc=1 Cjc=3.638p Mjc=.3085 Vjc=.75 Fc=.5 Cje=4.493p Mje=.2593 Vje=.75 Tr=239.5n Tf=301.2p Itf=.4 Vtf=4 Xtf=2 Rb=10)\n\
-     .model 2N3906 PNP(Is=1.41f Xti=3 Eg=1.11 Vaf=18.7 Bf=180.7 Ne=1.5 Ise=0 Ikf=80m Xtb=1.5 Br=4.977 Nc=2 Isc=0 Ikr=0 Rc=2 Cjc=4.5p Mjc=.3 Vjc=.75 Fc=.5 Cje=5p Mje=.3 Vje=.75 Tr=50n Tf=300p Itf=.4 Vtf=4 Xtf=2 Rb=10)\n"
+    crate::circuit::standard_spice_headers()
 }
 
 /// Generate minimal DC operating point netlist for fast feasibility gating
@@ -239,12 +272,7 @@ pub fn evaluate_preset(
     let op_netlist = to_op_netlist(circuit);
     let dc_nodes = run_dc_operating_point(&op_netlist, timeout)?;
 
-    let v_out = dc_nodes
-        .get(&NODE_OUT.to_string())
-        .or_else(|| dc_nodes.get(&format!("v({})", NODE_OUT)))
-        .or_else(|| dc_nodes.get("out"))
-        .copied()
-        .unwrap_or(0.0);
+    let v_out = dc_node_voltage(&dc_nodes, NODE_OUT)?;
 
     // Check output rail saturation
     if v_out >= circuit.vcc - preset.feasibility_rail_margin
@@ -266,21 +294,9 @@ pub fn evaluate_preset(
     // Check BJT active region for every transistor in circuit
     for comp in &circuit.components {
         if comp.comp_type == ComponentType::Q && comp.nodes.len() >= 3 {
-            let vc = dc_nodes
-                .get(&comp.nodes[0].to_string())
-                .or_else(|| dc_nodes.get(&format!("v({})", comp.nodes[0])))
-                .copied()
-                .unwrap_or(0.0);
-            let vb = dc_nodes
-                .get(&comp.nodes[1].to_string())
-                .or_else(|| dc_nodes.get(&format!("v({})", comp.nodes[1])))
-                .copied()
-                .unwrap_or(0.0);
-            let ve = dc_nodes
-                .get(&comp.nodes[2].to_string())
-                .or_else(|| dc_nodes.get(&format!("v({})", comp.nodes[2])))
-                .copied()
-                .unwrap_or(0.0);
+            let vc = dc_node_voltage(&dc_nodes, comp.nodes[0])?;
+            let vb = dc_node_voltage(&dc_nodes, comp.nodes[1])?;
+            let ve = dc_node_voltage(&dc_nodes, comp.nodes[2])?;
 
             if comp.value.to_uppercase().contains("3906") || comp.value.to_uppercase().contains("PNP") {
                 let veb = ve - vb;

@@ -1,4 +1,6 @@
-use crate::circuit::{Circuit, ComponentType, NODE_GND, NODE_IN, NODE_OUT, NODE_VCC, NODE_VEE};
+use crate::circuit::{
+    standard_spice_headers, Circuit, ComponentType, NODE_GND, NODE_IN, NODE_OUT, NODE_VCC, NODE_VEE,
+};
 use crate::spice::{run_simulation, SpiceError};
 use std::time::Duration;
 
@@ -69,8 +71,7 @@ pub fn to_realistic_netlist(circuit: &Circuit, title: &str, stray_cap_pf: f64) -
     let mut netlist = String::new();
 
     netlist.push_str(&format!("* Realistic Netlist: {}\n", title));
-    netlist.push_str(".include \"tl072.sub\"\n");
-    netlist.push_str(".model 1N4148 D(is=2.52n rs=0.568 n=1.752 cjo=4p m=0.4 tt=20n)\n");
+    netlist.push_str(standard_spice_headers());
 
     // Power supplies and AC input source
     netlist.push_str(&format!("V_in {} {} dc 0 ac 1\n", NODE_IN, NODE_GND));

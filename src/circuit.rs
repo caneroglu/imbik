@@ -7,6 +7,23 @@ pub const NODE_OUT: usize = 2;
 pub const NODE_VCC: usize = 3;
 pub const NODE_VEE: usize = 4;
 
+/// The single canonical SPICE model/include preamble shared by EVERY netlist
+/// generator in the crate.
+///
+/// This preamble used to be copy-pasted into four separate generators, and two of
+/// those copies silently omitted the BJT models. That made `to_tran_netlist` and the
+/// entire Monte Carlo path fail on any circuit containing a transistor, which forced
+/// `mc_dev_db` to `None` and capped every discrete discovery at COMMON rarity.
+/// Never inline these lines again - always call this function.
+pub fn standard_spice_headers() -> &'static str {
+    concat!(
+        ".include \"tl072.sub\"\n",
+        ".model 1N4148 D(is=2.52n rs=0.568 n=1.752 cjo=4p m=0.4 tt=20n)\n",
+        ".model 2N3904 NPN(Is=6.734f Xti=3 Eg=1.11 Vaf=74.03 Bf=416.4 Ne=1.259 Ise=6.734f Ikf=66.78m Xtb=1.5 Br=.7371 Nc=2 Isc=0 Ikr=0 Rc=1 Cjc=3.638p Mjc=.3085 Vjc=.75 Fc=.5 Cje=4.493p Mje=.2593 Vje=.75 Tr=239.5n Tf=301.2p Itf=.4 Vtf=4 Xtf=2 Rb=10)\n",
+        ".model 2N3906 PNP(Is=1.41f Xti=3 Eg=1.11 Vaf=18.7 Bf=180.7 Ne=1.5 Ise=0 Ikf=80m Xtb=1.5 Br=4.977 Nc=2 Isc=0 Ikr=0 Rc=2 Cjc=4.5p Mjc=.3 Vjc=.75 Fc=.5 Cje=5p Mje=.3 Vje=.75 Tr=50n Tf=300p Itf=.4 Vtf=4 Xtf=2 Rb=10)\n",
+    )
+}
+
 /// Permitted component types strictly white-listed.
 /// Letters E, F, G, H, B, A are explicitly forbidden.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -254,10 +271,7 @@ impl Circuit {
         let mut netlist = String::new();
 
         netlist.push_str(&format!("* {}\n", title));
-        netlist.push_str(".include \"tl072.sub\"\n");
-        netlist.push_str(".model 1N4148 D(is=2.52n rs=0.568 n=1.752 cjo=4p m=0.4 tt=20n)\n");
-        netlist.push_str(".model 2N3904 NPN(Is=6.734f Xti=3 Eg=1.11 Vaf=74.03 Bf=416.4 Ne=1.259 Ise=6.734f Ikf=66.78m Xtb=1.5 Br=.7371 Nc=2 Isc=0 Ikr=0 Rc=1 Cjc=3.638p Mjc=.3085 Vjc=.75 Fc=.5 Cje=4.493p Mje=.2593 Vje=.75 Tr=239.5n Tf=301.2p Itf=.4 Vtf=4 Xtf=2 Rb=10)\n");
-        netlist.push_str(".model 2N3906 PNP(Is=1.41f Xti=3 Eg=1.11 Vaf=18.7 Bf=180.7 Ne=1.5 Ise=0 Ikf=80m Xtb=1.5 Br=4.977 Nc=2 Isc=0 Ikr=0 Rc=2 Cjc=4.5p Mjc=.3 Vjc=.75 Fc=.5 Cje=5p Mje=.3 Vje=.75 Tr=50n Tf=300p Itf=.4 Vtf=4 Xtf=2 Rb=10)\n");
+        netlist.push_str(standard_spice_headers());
 
         // Power supply sources and input signal source
         netlist.push_str(&format!("V_in {} {} dc 0 ac 1\n", NODE_IN, NODE_GND));
@@ -301,8 +315,7 @@ impl Circuit {
         let mut netlist = String::new();
 
         netlist.push_str(&format!("* {}\n", title));
-        netlist.push_str(".include \"tl072.sub\"\n");
-        netlist.push_str(".model 1N4148 D(is=2.52n rs=0.568 n=1.752 cjo=4p m=0.4 tt=20n)\n");
+        netlist.push_str(standard_spice_headers());
 
         // Power supply sources and sine input source
         netlist.push_str(&format!(
@@ -378,6 +391,45 @@ impl std::error::Error for CircuitError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression guard for the netlist-header duplication bug.
+    ///
+    /// The SPICE preamble was once copy-pasted into four generators and two copies
+    /// silently omitted the BJT models. Nothing failed to compile; instead every
+    /// transistor circuit failed at simulation time, which silently disabled the whole
+    /// Monte Carlo robustness path. If you add a new netlist generator, add it here.
+    #[test]
+    fn every_netlist_generator_declares_every_device_model() {
+        let mut c = Circuit::new();
+        c.add_component(Component::new('Q', 1, vec![NODE_VCC, 10, NODE_OUT], "2N3904").unwrap());
+        c.add_component(Component::new('R', 1, vec![NODE_VCC, 10], "100k").unwrap());
+        c.add_component(Component::new('R', 2, vec![10, NODE_VEE], "110k").unwrap());
+        c.add_component(Component::new('R', 3, vec![NODE_OUT, NODE_VEE], "4.7k").unwrap());
+        c.add_component(Component::new('C', 1, vec![NODE_IN, 10], "1uF").unwrap());
+        c.validate().unwrap();
+
+        let preset = crate::preset::Preset::buffer_default();
+        let generated = [
+            ("to_netlist", c.to_netlist("t")),
+            ("to_tran_netlist", c.to_tran_netlist("t", 0.1, 1000.0, 0.005)),
+            ("to_realistic_netlist", crate::realism::to_realistic_netlist(&c, "t", 22.0)),
+            ("to_characterization_netlist", crate::fitness::to_characterization_netlist(&c, "t", 22.0)),
+            ("to_op_netlist", crate::fitness::to_op_netlist(&c)),
+            ("to_probe_netlist", crate::fitness::to_probe_netlist(&c, &preset, 22.0)),
+        ];
+
+        for (name, netlist) in &generated {
+            for required in [".model 2N3904", ".model 2N3906", ".model 1N4148", "tl072.sub"] {
+                assert!(
+                    netlist.contains(required),
+                    "netlist generator `{}` does not declare `{}`; a circuit using that                      device would fail in ngspice with an unknown-model error",
+                    name,
+                    required
+                );
+            }
+        }
+    }
+
     use crate::spice::run_simulation;
     use std::time::Duration;
 
