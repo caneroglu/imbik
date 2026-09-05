@@ -1,0 +1,562 @@
+use crate::circuit::{Circuit, ComponentType, NODE_GND, NODE_IN, NODE_OUT, NODE_VCC, NODE_VEE};
+use crate::engine::CheckpointData;
+use crate::fitness::{euclidean_distance, BehaviorDescriptor};
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rarity {
+    Common,    // Nearest-neighbor distance < 0.30
+    Rare,      // Nearest-neighbor distance >= 0.30
+    Epic,      // Nearest-neighbor distance >= 0.60 AND Monte Carlo deviation < 6.0 dB
+    Legendary, // Physically verified on breadboard via oscilloscope ingest
+}
+
+impl Rarity {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Rarity::Common => "COMMON",
+            Rarity::Rare => "RARE",
+            Rarity::Epic => "EPIC",
+            Rarity::Legendary => "LEGENDARY",
+        }
+    }
+
+    pub fn colored_label(&self) -> String {
+        match self {
+            Rarity::Common => format!("\x1b[90m[{:<4}]\x1b[0m", self.label()),
+            Rarity::Rare => format!("\x1b[1;36m[{:<4}]\x1b[0m", self.label()),
+            Rarity::Epic => format!("\x1b[1;35m[{:<4}]\x1b[0m", self.label()),
+            Rarity::Legendary => format!("\x1b[1;33m[{:<9}]\x1b[0m", self.label()),
+        }
+    }
+}
+
+/// Render 11D Behavior Descriptor into a compact 11-character UTF-8 sparkline bar
+pub fn render_sparkline(d: &BehaviorDescriptor) -> String {
+    let blocks = [' ', ' ', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let mut s = String::with_capacity(11);
+    for &val in d {
+        let clamped = val.clamp(0.0, 1.0);
+        let idx = (clamped * 8.0).round() as usize;
+        s.push(blocks[idx.min(8)]);
+    }
+    s
+}
+
+/// Derive a human-readable, colorful character tag from the 11D descriptor
+pub fn describe_character(d: &BehaviorDescriptor) -> String {
+    if d[9] > 0.02 {
+        let f_khz = 10f64.powf(d[10] * 5.0) / 1000.0;
+        if f_khz > 20.0 {
+            format!("⚠️ Parazitik Çınlama ({:.1} kHz)", f_khz)
+        } else {
+            format!("⚡ Otonom Osilatör ({:.1} kHz)", f_khz)
+        }
+    } else if d[7] > 0.08 {
+        "🔥 Sert Kırpma / Fuzz (H5 Baskın)".to_string()
+    } else if d[5] > 0.04 && d[5] > d[6] * 1.25 {
+        "🎸 Asimetrik / Çift Harmonik (Warm Tube)".to_string()
+    } else if d[6] > 0.04 && d[6] > d[5] * 1.25 {
+        "⚡ Simetrik Kırpma (Overdrive)".to_string()
+    } else if d[8] > 0.20 {
+        format!("🗜️ Dinamik Kompresör ({:.0}%)", d[8] * 100.0)
+    } else if d[0] > 0.5 && d[3] > 0.25 {
+        format!("🔊 Rezonanslı Filtre (Peak Q +{:.1}dB)", d[3] * 20.0)
+    } else if d[0] > 0.5 {
+        let fc = 10f64.powf(d[1] * 5.0);
+        format!("🎛️ Aktif Filtre (fc ≈ {:.0} Hz)", fc)
+    } else if d[0] < 0.5 && d[5] < 0.005 && d[4] < 0.01 {
+        "〰️ Geniş Bant Lineer Kat".to_string()
+    } else {
+        "🎚️ Analog Dalga Şekillendirici".to_string()
+    }
+}
+
+/// Summarize circuit components in compact string (e.g. "4R 2C 1D 1X (8)")
+pub fn summarize_components(c: &Circuit) -> String {
+    let mut r = 0;
+    let mut cap = 0;
+    let mut d = 0;
+    let mut q = 0;
+    let mut x = 0;
+    for comp in &c.components {
+        match comp.comp_type {
+            ComponentType::R => r += 1,
+            ComponentType::C => cap += 1,
+            ComponentType::D => d += 1,
+            ComponentType::Q => q += 1,
+            ComponentType::X => x += 1,
+            _ => {}
+        }
+    }
+    format!("{}R {}C {}D {}Q {}X ({:>2})", r, cap, d, q, x, c.components.len())
+}
+
+/// Determine circuit rarity from its nearest-neighbor distance, Monte Carlo environmental deviation,
+/// and behavioral functionality.
+///
+/// Standards:
+/// - COMMON: Classic topology clone, weak character, high tolerance spread, or ultrasonic defect.
+/// - RARE: Distinctive acoustic or filter behavior, acceptable breadboard tolerance (mc <= 4.0 dB).
+/// - EPIC: Truly novel topology, strictly functional, and highly resistant to analog environmental
+///   dirt / component spread (mc <= 2.5 dB), zero ultrasonic parasitic oscillation.
+/// - LEGENDARY: Literature-grade analog breakthrough! Extreme novelty (nn >= 0.70), bulletproof
+///   stability (mc <= 1.5 dB), rich musical/filter character, or physically verified on hardware.
+pub fn evaluate_rarity(nn_dist: f64, mc_dev_db: Option<f64>, desc: &BehaviorDescriptor) -> Rarity {
+    // 1. Parasitic Instability Check:
+    // If autonomous oscillation is detected (d[9] > 0.02) and frequency is ultrasonic (> 20 kHz),
+    // it's an unstable ringing artifact from breadboard parasitics, NOT a clean audio oscillator.
+    let has_osc = desc[9] > 0.02;
+    let f_osc_hz = if has_osc {
+        10f64.powf(desc[10] * 5.0)
+    } else {
+        0.0
+    };
+    let is_ultrasonic_parasite = has_osc && f_osc_hz > 20_000.0;
+
+    // 2. Functionality Checks:
+    // - Audio Filter: has_filter flag active and cutoff in audio band (20Hz - 20kHz) or notable resonance
+    let has_filter = desc[0] > 0.5;
+    let fc_hz = if has_filter { 10f64.powf(desc[1] * 5.0) } else { 0.0 };
+    let audio_filter = has_filter && ((fc_hz >= 20.0 && fc_hz <= 20_000.0) || desc[3] > 0.20);
+
+    // - Musical Non-Linearity: meaningful harmonic generation or dynamic compression
+    let has_harmonics = (desc[5] > 0.03) || (desc[6] > 0.03) || (desc[7] > 0.03) || (desc[8] > 0.15);
+
+    // - True Audio Autonomous Oscillator: oscillation within human hearing range
+    let audio_osc = has_osc && (f_osc_hz >= 20.0 && f_osc_hz <= 20_000.0);
+
+    let is_functional = (audio_filter || has_harmonics || audio_osc) && !is_ultrasonic_parasite;
+
+    // 3. Environmental Robustness (Monte Carlo component variation & breadboard stray tolerance):
+    let mc_val = mc_dev_db.unwrap_or(99.0);
+
+    // 4. LEGENDARY: Literature-grade analog breakthrough!
+    let is_rich_char = desc[5] > 0.05 || desc[8] > 0.20 || desc[3] > 0.25 || desc[7] > 0.08;
+    if is_functional && nn_dist >= 0.70 && mc_val <= 1.5 && is_rich_char {
+        return Rarity::Legendary;
+    }
+
+    // 5. EPIC: Truly distinctive, environmentally robust, and strictly functional
+    if is_functional && nn_dist >= 0.50 && mc_val <= 2.5 {
+        return Rarity::Epic;
+    }
+
+    // 6. RARE: Noticeable novelty and acceptable stability
+    if is_functional && nn_dist >= 0.35 && mc_val <= 4.0 {
+        return Rarity::Rare;
+    }
+
+    // 7. COMMON: Classic topology clone, high tolerance spread, or weak character
+    Rarity::Common
+}
+
+pub struct ArchiveItemView<'a> {
+    pub id: usize,
+    pub circuit: &'a Circuit,
+    pub descriptor: &'a BehaviorDescriptor,
+    pub nn_dist: f64,
+    pub mc_dev_db: Option<f64>,
+    pub rarity: Rarity,
+    pub generation: usize,
+    pub fitness: Option<f64>,
+    pub obj_summary: Option<String>,
+}
+
+/// Load and analyze all entries in a checkpoint file
+pub fn load_archive_views(checkpoint_path: &Path) -> Result<Vec<ArchiveItemView<'static>>, Box<dyn std::error::Error>> {
+    let content = fs::read_to_string(checkpoint_path)?;
+    let checkpoint: CheckpointData = serde_json::from_str(&content)?;
+
+    let n = checkpoint.archive.entries.len();
+    if n == 0 {
+        return Ok(Vec::new());
+    }
+
+    // Pre-calculate nearest neighbor distance for every archive entry
+    let mut nn_distances = Vec::with_capacity(n);
+    for i in 0..n {
+        let mut min_dist = f64::INFINITY;
+        for j in 0..n {
+            if i != j {
+                let dist = euclidean_distance(
+                    &checkpoint.archive.entries[i].descriptor,
+                    &checkpoint.archive.entries[j].descriptor,
+                );
+                if dist < min_dist {
+                    min_dist = dist;
+                }
+            }
+        }
+        if min_dist.is_infinite() {
+            min_dist = 1.0;
+        }
+        nn_distances.push(min_dist);
+    }
+
+    let mut views = Vec::with_capacity(n);
+    for (i, entry) in checkpoint.archive.entries.into_iter().enumerate() {
+        let nn = nn_distances[i];
+        let mc = entry.mc_dev_db;
+        let rarity = evaluate_rarity(nn, mc, &entry.descriptor);
+        let generation = entry.generation;
+        let fitness = entry.fitness;
+        let obj_summary = entry.obj_summary;
+
+        let static_circuit = Box::leak(Box::new(entry.circuit));
+        let static_desc = Box::leak(Box::new(entry.descriptor));
+
+        views.push(ArchiveItemView {
+            id: i,
+            circuit: static_circuit,
+            descriptor: static_desc,
+            nn_dist: nn,
+            mc_dev_db: mc,
+            rarity,
+            generation,
+            fitness,
+            obj_summary,
+        });
+    }
+
+    Ok(views)
+}
+
+/// Print formatted, colorful loot table for the archive
+pub fn list_archive(checkpoint_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let mut items = load_archive_views(checkpoint_path)?;
+    if items.is_empty() {
+        println!("Archive in {:?} is empty.", checkpoint_path);
+        return Ok(());
+    }
+
+    // Sort by nearest neighbor distance (highest novelty / rarest first)
+    items.sort_by(|a, b| b.nn_dist.partial_cmp(&a.nn_dist).unwrap_or(std::cmp::Ordering::Equal));
+
+    println!("\n========================================================================================================================");
+    println!("  🏆 İMBİK ANALOG LOOT TABLE — ARCHIVE DISCOVERIES (Total: {})", items.len());
+    println!("  Source: {:?}", checkpoint_path);
+    println!("========================================================================================================================");
+    println!(
+        " {:<4} | {:<5} | {:<10} | {:<10} | {:<12} | {:<16} | {:<8} | {:<6} | {:<28}",
+        "ID", "GEN", "FITNESS", "RARITY", "SPARK (11D)", "PARTS (R C D X)", "NN DIST", "MC DEV", "CHARACTER SIGNATURE"
+    );
+    println!("------------------------------------------------------------------------------------------------------------------------");
+
+    let mut legendary_count = 0;
+    let mut epic_count = 0;
+    let mut rare_count = 0;
+    let mut common_count = 0;
+
+    for item in &items {
+        match item.rarity {
+            Rarity::Legendary => legendary_count += 1,
+            Rarity::Epic => epic_count += 1,
+            Rarity::Rare => rare_count += 1,
+            Rarity::Common => common_count += 1,
+        }
+
+        let spark = render_sparkline(item.descriptor);
+        let comps = summarize_components(item.circuit);
+        let char_tag = describe_character(item.descriptor);
+        let mc_str = match item.mc_dev_db {
+            Some(dev) => format!("{:.1}dB", dev),
+            None => "--".to_string(),
+        };
+        let fit_str = match item.fitness {
+            Some(f) => format!("{:.4}", f),
+            None => "--".to_string(),
+        };
+        let gen_str = if item.generation > 0 {
+            format!("G{:>2}", item.generation)
+        } else {
+            "--".to_string()
+        };
+
+        println!(
+            " #{:<3} | {:<5} | {:<10} | {:<19} | \x1b[33m{:<12}\x1b[0m | {:<16} | {:.4}  | {:<6} | {}",
+            item.id,
+            gen_str,
+            fit_str,
+            item.rarity.colored_label(),
+            spark,
+            comps,
+            item.nn_dist,
+            mc_str,
+            char_tag
+        );
+    }
+
+    println!("------------------------------------------------------------------------------------------------------------------------");
+    println!(
+        " Summary: \x1b[1;33m{} LEGENDARY\x1b[0m, \x1b[1;35m{} EPIC\x1b[0m, \x1b[1;36m{} RARE\x1b[0m, \x1b[90m{} COMMON\x1b[0m.",
+        legendary_count, epic_count, rare_count, common_count
+    );
+    println!(" Tips: Use `imbik show <id>` to inspect details, or `imbik bench <id>` to export breadboard package.");
+    println!("========================================================================================================================\n");
+
+    Ok(())
+}
+
+/// Print comprehensive detail view of an individual archived circuit
+pub fn show_circuit(checkpoint_path: &Path, circuit_id: usize) -> Result<(), Box<dyn std::error::Error>> {
+    let items = load_archive_views(checkpoint_path)?;
+    let item = items
+        .iter()
+        .find(|it| it.id == circuit_id)
+        .ok_or_else(|| format!("Circuit ID #{} not found in archive (total: {})", circuit_id, items.len()))?;
+
+    let d = item.descriptor;
+
+    println!("\n=================================================================================");
+    if item.generation > 0 {
+        println!("  🔍 CIRCUIT INSPECTOR — DISCOVERY #{} (Discovered in Generation {})", item.id, item.generation);
+    } else {
+        println!("  🔍 CIRCUIT INSPECTOR — DISCOVERY #{}", item.id);
+    }
+    println!("=================================================================================");
+    if let Some(fit) = item.fitness {
+        println!("- **Fitness Score**: {:.6}", fit);
+    }
+    if let Some(ref summary) = item.obj_summary {
+        println!("- **Objective Breakdown**: {}", summary);
+    }
+    println!("- **Rarity Tier**: {}", item.rarity.colored_label());
+    println!("- **Character Tag**: {}", describe_character(d));
+    println!("- **Nearest Neighbor Distance**: {:.4}", item.nn_dist);
+    println!(
+        "- **Worst-Case Monte Carlo Deviation**: {}",
+        item.mc_dev_db
+            .map(|v| format!("{:.2} dB", v))
+            .unwrap_or_else(|| "N/A".to_string())
+    );
+    println!("- **Total Components**: {}", item.circuit.components.len());
+    println!("- **Supply Rails**: ±{:.1}V (VCC=+{:.1}V, VEE=-{:.1}V, GND=0V)", item.circuit.vcc, item.circuit.vcc, item.circuit.vee.abs());
+
+    println!("\n## 11-Dimensional Behavior Descriptor Vector");
+    println!("  Sparkline: \x1b[33m{}\x1b[0m\n", render_sparkline(d));
+    println!(" | Index | Dimension Name            | Value    | Bar      | Physical Interpretation");
+    println!(" | :---: | :------------------------ | :------: | :------: | :----------------------");
+
+    let dim_names = [
+        ("D0: ac_has_filter", d[0], if d[0] > 0.5 { "Filtre Aktif (1.0)" } else { "Geniş Bant / Kırpıcı (0.0)" }),
+        ("D1: ac_cutoff_norm", d[1], &format!("fc ≈ {:.1} Hz", 10f64.powf(d[1] * 5.0))),
+        ("D2: ac_rolloff_norm", d[2], &format!("Eğim ≈ {:.1} dB/dec", d[2] * -40.0)),
+        ("D3: ac_peak_q_norm", d[3], &format!("Rezonans Artışı +{:.1} dB", d[3] * 20.0)),
+        ("D4: tran_asym_delta", d[4], &format!("Asimetri Farkı: {:.3}", d[4])),
+        ("D5: tran_h2_ratio", d[5], &format!("H2 / H1: {:.4} ({:.1}%)", d[5], d[5] * 100.0)),
+        ("D6: tran_h3_ratio", d[6], &format!("H3 / H1: {:.4} ({:.1}%)", d[6], d[6] * 100.0)),
+        ("D7: tran_h5_ratio", d[7], &format!("H5 / H1: {:.4} ({:.1}%)", d[7], d[7] * 100.0)),
+        ("D8: tran_compression", d[8], &format!("Dinamik Kazanç Düşüşü: {:.1}%", d[8] * 100.0)),
+        ("D9: tran_osc_rms", d[9], if d[9] > 0.02 { "Otonom Salınım Var" } else { "Kararlı (0.0)" }),
+        ("D10: tran_osc_freq", d[10], &format!("Salınım Frekansı: {:.1} kHz", 10f64.powf(d[10] * 5.0) / 1000.0)),
+    ];
+
+    let blocks = [' ', ' ', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    for (idx, (name, val, interp)) in dim_names.iter().enumerate() {
+        let clamped = val.clamp(0.0, 1.0);
+        let b_idx = (clamped * 8.0).round() as usize;
+        let bar_str = format!("{}{}", blocks[b_idx.min(8)], " ".repeat(7));
+        println!(" | {:<5} | {:<24} | {:<8.4} | {:<8} | {}", idx, name, val, bar_str, interp);
+    }
+
+    println!("\n## Component Netlist");
+    for comp in &item.circuit.components {
+        let prefix = comp.comp_type.to_char();
+        let nodes_str = comp
+            .nodes
+            .iter()
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("  • {}{:<3} {:<8} [Nodes: {}]", prefix, comp.id, comp.value, nodes_str);
+    }
+
+    println!("\n## Breadboard Node Connection Map");
+    let mut node_map: BTreeMap<usize, Vec<String>> = BTreeMap::new();
+    for comp in &item.circuit.components {
+        let prefix = comp.comp_type.to_char();
+        match comp.comp_type {
+            ComponentType::R | ComponentType::C => {
+                if comp.nodes.len() >= 2 {
+                    node_map.entry(comp.nodes[0]).or_default().push(format!("{}{}[1] ({})", prefix, comp.id, comp.value));
+                    node_map.entry(comp.nodes[1]).or_default().push(format!("{}{}[2] ({})", prefix, comp.id, comp.value));
+                }
+            }
+            ComponentType::D => {
+                if comp.nodes.len() >= 2 {
+                    node_map.entry(comp.nodes[0]).or_default().push(format!("D{}[Anode]", comp.id));
+                    node_map.entry(comp.nodes[1]).or_default().push(format!("D{}[Cathode | Ring]", comp.id));
+                }
+            }
+            ComponentType::Q => {
+                if comp.nodes.len() >= 3 {
+                    node_map.entry(comp.nodes[0]).or_default().push(format!("Q{}[Collector] ({})", comp.id, comp.value));
+                    node_map.entry(comp.nodes[1]).or_default().push(format!("Q{}[Base] ({})", comp.id, comp.value));
+                    node_map.entry(comp.nodes[2]).or_default().push(format!("Q{}[Emitter] ({})", comp.id, comp.value));
+                }
+            }
+            ComponentType::X => {
+                if comp.nodes.len() >= 5 {
+                    node_map.entry(comp.nodes[0]).or_default().push(format!("X{}[IN+]", comp.id));
+                    node_map.entry(comp.nodes[1]).or_default().push(format!("X{}[IN-]", comp.id));
+                    node_map.entry(comp.nodes[2]).or_default().push(format!("X{}[VCC Pin 8]", comp.id));
+                    node_map.entry(comp.nodes[3]).or_default().push(format!("X{}[VEE Pin 4]", comp.id));
+                    node_map.entry(comp.nodes[4]).or_default().push(format!("X{}[OUT Pin 1]", comp.id));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    for (node, pins) in &node_map {
+        let role = match *node {
+            NODE_GND => "GND (0V)",
+            NODE_IN => "INPUT",
+            NODE_OUT => "OUTPUT",
+            NODE_VCC => "VCC (+9V)",
+            NODE_VEE => "VEE (-9V)",
+            _ => "Tie Point",
+        };
+        println!("  - Node {:>2} ({:<10}): {}", node, role, pins.join(", "));
+    }
+
+    println!("\nReady for breadboard export! Run:");
+    println!("  imbik bench {} [out_dir]", item.id);
+    println!("=================================================================================\n");
+
+    Ok(())
+}
+
+/// Export breadboard package for an archived circuit
+pub fn export_bench_from_checkpoint(
+    checkpoint_path: &Path,
+    circuit_id: usize,
+    out_dir: Option<&Path>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let items = load_archive_views(checkpoint_path)?;
+    let item = items
+        .iter()
+        .find(|it| it.id == circuit_id)
+        .ok_or_else(|| format!("Circuit ID #{} not found in archive", circuit_id))?;
+
+    let default_dir = PathBuf::from(format!("bench/circuit_{:02}", circuit_id));
+    let target_dir = out_dir.unwrap_or(&default_dir);
+
+    let report = crate::bench::generate_bench_package(
+        item.circuit,
+        item.descriptor,
+        target_dir,
+        Duration::from_secs(3),
+    )?;
+
+    println!("\n✅ Bench Package successfully exported to: {:?}", report.output_dir);
+    println!("  - BOM:           {:?}", report.bom_path);
+    println!("  - Test Protocol: {:?}", report.protocol_path);
+    println!("  - Reference CSV: {:?}", report.reference_csv_path);
+    println!("  - Reference AC:  {:?}", report.reference_ac_path);
+    println!("  - SPICE Netlist: {:?}", report.netlist_path);
+
+    // Automatically render AoE SchemDraw schematic via uv
+    let svg_path = target_dir.join("schematic.svg");
+    let status = std::process::Command::new("uv")
+        .args([
+            "run",
+            "--with",
+            "schemdraw",
+            "python",
+            "scripts/schematic.py",
+            checkpoint_path.to_str().unwrap_or(""),
+            &circuit_id.to_string(),
+            svg_path.to_str().unwrap_or(""),
+        ])
+        .status();
+
+    if let Ok(st) = status {
+        if st.success() {
+            println!("  - AoE Schematic: {:?}", svg_path);
+        }
+    }
+
+    Ok(report.output_dir)
+}
+
+/// Render standalone AoE SchemDraw schematic
+pub fn draw_circuit_schematic(
+    checkpoint_path: &Path,
+    circuit_id: usize,
+    out_svg: Option<&Path>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let default_svg = PathBuf::from(format!("bench/circuit_{:02}/schematic.svg", circuit_id));
+    let target_svg = out_svg.unwrap_or(&default_svg);
+
+    if let Some(parent) = target_svg.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let status = std::process::Command::new("uv")
+        .args([
+            "run",
+            "--with",
+            "schemdraw",
+            "python",
+            "scripts/schematic.py",
+            checkpoint_path.to_str().unwrap_or(""),
+            &circuit_id.to_string(),
+            target_svg.to_str().unwrap_or(""),
+        ])
+        .status()?;
+
+    if !status.success() {
+        return Err(format!("schemdraw renderer failed with status: {}", status).into());
+    }
+
+    println!("\n✅ AoE SchemDraw schematic successfully generated: {:?}", target_svg);
+    Ok(target_svg.to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rarity_and_character_tagging() {
+        // Asymmetric Clipper
+        let d_clipper = [0.0, 0.0, 0.0, 0.0, 0.53, 0.26, 0.06, 0.02, 0.35, 0.0, 0.0];
+        let tag_c = describe_character(&d_clipper);
+        assert!(tag_c.contains("Asimetrik") || tag_c.contains("Kırpma"));
+
+        // Sparkline length must be exactly 11 characters
+        let spark = render_sparkline(&d_clipper);
+        assert_eq!(spark.chars().count(), 11);
+
+        // Filter
+        let d_filter = [1.0, 0.6, 0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let tag_f = describe_character(&d_filter);
+        assert!(tag_f.contains("Filtre"));
+
+        // Rarity evaluation
+        assert_eq!(evaluate_rarity(0.20, None, &d_clipper), Rarity::Common);
+        assert_eq!(evaluate_rarity(0.40, Some(3.0), &d_clipper), Rarity::Rare);
+        assert_eq!(evaluate_rarity(0.55, Some(2.0), &d_clipper), Rarity::Epic);
+        assert_eq!(evaluate_rarity(0.55, Some(5.0), &d_clipper), Rarity::Common); // Too fragile for Epic
+        assert_eq!(evaluate_rarity(0.75, Some(1.0), &d_clipper), Rarity::Legendary);
+    }
+
+    #[test]
+    fn test_list_and_show_on_checkpoint() {
+        let cp_path = PathBuf::from("target/test_checkpoints/checkpoint_final.json");
+        if !cp_path.exists() {
+            return;
+        }
+
+        let views = load_archive_views(&cp_path).expect("Failed to load archive views");
+        assert!(!views.is_empty());
+
+        list_archive(&cp_path).expect("list_archive failed");
+        show_circuit(&cp_path, 0).expect("show_circuit failed");
+    }
+}

@@ -1,0 +1,31 @@
+* Characterization Netlist: Bench Ref
+.include "tl072.sub"
+.model 1N4148 D(is=2.52n rs=0.568 n=1.752 cjo=4p m=0.4 tt=20n)
+.model 2N3904 NPN(Is=6.734f Xti=3 Eg=1.11 Vaf=74.03 Bf=416.4 Ne=1.259 Ise=6.734f Ikf=66.78m Xtb=1.5 Br=.7371 Nc=2 Isc=0 Ikr=0 Rc=1 Cjc=3.638p Mjc=.3085 Vjc=.75 Fc=.5 Cje=4.493p Mje=.2593 Vje=.75 Tr=239.5n Tf=301.2p Itf=.4 Vtf=4 Xtf=2 Rb=10)
+.model 2N3906 PNP(Is=1.41f Xti=3 Eg=1.11 Vaf=18.7 Bf=180.7 Ne=1.5 Ise=0 Ikf=80m Xtb=1.5 Br=4.977 Nc=2 Isc=0 Ikr=0 Rc=2 Cjc=4.5p Mjc=.3 Vjc=.75 Fc=.5 Cje=5p Mje=.3 Vje=.75 Tr=50n Tf=300p Itf=.4 Vtf=4 Xtf=2 Rb=10)
+V_in 1 0 dc 0 ac 1 sin(0 0.1 1k)
+V_cc 3 0 dc 9.00
+V_ee 4 0 dc -9.00
+Q1    3 10 2 2N3904
+R1    3 10 100k
+R2    10 4 110k
+R3    2 4 4.7k
+C1    1 10 1uF
+C_stray_8000 10 0 22.00pF
+C_stray_8001 2 0 22.00pF
+.control
+op
+print allv
+ac dec 50 10 100k
+wrdata ac_out.txt v(2)
+tran 10us 5ms
+wrdata tran_small.txt v(2) v(1)
+alter @v_in[sin] = [ 0 2.0 1k ]
+tran 10us 5ms
+wrdata tran_large.txt v(2) v(1)
+alter @v_in[sin] = [ 0 0 0 ]
+tran 20us 10ms
+wrdata tran_zero.txt v(2)
+quit
+.endc
+.end

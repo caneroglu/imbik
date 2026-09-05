@@ -1,0 +1,17 @@
+* Test Discovered Circuit with R5=300k pull-up (Gen 20 Best)
+.model 2N3904 NPN(Is=6.734f Xti=3 Eg=1.11 Vaf=74.03 Bf=416.4 Ne=1.259 Ise=6.734f Ikf=66.78m Xtb=1.5 Br=.7371 Nc=2 Isc=0 Ikr=0 Rc=1 Cjc=3.638p Mjc=.3085 Vjc=.75 Fc=.5 Cje=4.493p Mje=.2593 Vje=.75 Tr=239.5n Tf=301.2p Itf=.4 Vtf=4 Xtf=2 Rb=10)
+V_in 1 0 dc 0
+V_cc 3 0 dc 9.00
+V_ee 4 0 dc -9.00
+Q1 3 10 2 2N3904
+R1 3 10 100k
+R2 10 4 100k
+R3 2 4 4.3k
+C1 1 10 1uF
+R5 3 10 300k
+.control
+op
+print allv
+quit
+.endc
+.end

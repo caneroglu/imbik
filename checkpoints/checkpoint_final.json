@@ -1,0 +1,2692 @@
+{
+  "generation": 15,
+  "config": {
+    "population_size": 20,
+    "max_generations": 15,
+    "novelty_threshold": 0.5,
+    "min_novelty_dist": 0.25,
+    "k_neighbors": 3,
+    "checkpoint_interval": 50,
+    "checkpoint_dir": "checkpoints",
+    "stray_cap_pf": 22.0,
+    "sim_timeout_secs": 2,
+    "monte_carlo_runs": 20,
+    "seed": 16962,
+    "preset": {
+      "name": "buffer",
+      "description": "High-Z Unity-Gain Buffer with 10k Load Driving (Discrete Hunting)",
+      "feasibility_max_dc": 2.0,
+      "feasibility_rail_margin": 0.5,
+      "allow_opamps": false,
+      "probes": [
+        {
+          "name": "Gain@1kHz",
+          "probe_type": "Gain",
+          "condition": {
+            "freq": 1000.0,
+            "vin": 0.1,
+            "r_load": 10000.0
+          },
+          "kind": "Closeness",
+          "want": 1.0,
+          "soft": 0.5,
+          "weight": 3.0
+        },
+        {
+          "name": "Zin@1kHz",
+          "probe_type": "Zin",
+          "condition": {
+            "freq": 1000.0,
+            "vin": 0.1,
+            "r_load": 10000.0
+          },
+          "kind": "Greater",
+          "want": 1000000.0,
+          "soft": 10000.0,
+          "weight": 3.5
+        },
+        {
+          "name": "DcOffset",
+          "probe_type": "DcOffset",
+          "condition": {
+            "freq": 0.0,
+            "vin": 0.0,
+            "r_load": 10000.0
+          },
+          "kind": "Lesser",
+          "want": 0.02,
+          "soft": 0.8,
+          "weight": 1.5
+        },
+        {
+          "name": "BOM_Count",
+          "probe_type": "Bom",
+          "condition": {
+            "freq": 0.0,
+            "vin": 0.0,
+            "r_load": 0.0
+          },
+          "kind": "Lesser",
+          "want": 4.0,
+          "soft": 10.0,
+          "weight": 1.0
+        }
+      ]
+    }
+  },
+  "stats": {
+    "generation": 15,
+    "valid_topologies": 20,
+    "constraint_passed": 20,
+    "archive_size": 4,
+    "max_novelty": 1.0,
+    "avg_novelty": 1.0,
+    "duration_ms": 0
+  },
+  "archive": {
+    "entries": [
+      {
+        "circuit": {
+          "nodes": [
+            4,
+            3,
+            10,
+            11,
+            0,
+            2,
+            1
+          ],
+          "components": [
+            {
+              "comp_type": "Q",
+              "id": 1,
+              "nodes": [
+                3,
+                10,
+                2
+              ],
+              "value": "2N3904"
+            },
+            {
+              "comp_type": "R",
+              "id": 1,
+              "nodes": [
+                3,
+                11
+              ],
+              "value": "100k"
+            },
+            {
+              "comp_type": "R",
+              "id": 2,
+              "nodes": [
+                11,
+                4
+              ],
+              "value": "100k"
+            },
+            {
+              "comp_type": "R",
+              "id": 3,
+              "nodes": [
+                11,
+                10
+              ],
+              "value": "47k"
+            },
+            {
+              "comp_type": "R",
+              "id": 4,
+              "nodes": [
+                2,
+                4
+              ],
+              "value": "4.7k"
+            },
+            {
+              "comp_type": "C",
+              "id": 1,
+              "nodes": [
+                1,
+                10
+              ],
+              "value": "1uF"
+            },
+            {
+              "comp_type": "C",
+              "id": 2,
+              "nodes": [
+                2,
+                11
+              ],
+              "value": "4.7uF"
+            }
+          ],
+          "vcc": 9.0,
+          "vee": -9.0
+        },
+        "descriptor": [
+          0.7101591363094809,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "mc_dev_db": null,
+        "generation": 1,
+        "fitness": 0.7101591363094809,
+        "obj_summary": "Gain@1kHz=0.99 (sc=0.99) | Zin@1kHz=472489.33 (sc=0.84) | DcOffset=1.64 (sc=0.00) | BOM_Count=7.00 (sc=0.50)"
+      },
+      {
+        "circuit": {
+          "nodes": [
+            4,
+            3,
+            21,
+            10,
+            11,
+            0,
+            2,
+            1
+          ],
+          "components": [
+            {
+              "comp_type": "Q",
+              "id": 1,
+              "nodes": [
+                3,
+                10,
+                2
+              ],
+              "value": "2N3904"
+            },
+            {
+              "comp_type": "R",
+              "id": 1,
+              "nodes": [
+                3,
+                11
+              ],
+              "value": "100k"
+            },
+            {
+              "comp_type": "R",
+              "id": 2,
+              "nodes": [
+                11,
+                21
+              ],
+              "value": "100k"
+            },
+            {
+              "comp_type": "R",
+              "id": 3,
+              "nodes": [
+                11,
+                10
+              ],
+              "value": "47k"
+            },
+            {
+              "comp_type": "R",
+              "id": 4,
+              "nodes": [
+                2,
+                4
+              ],
+              "value": "4.7k"
+            },
+            {
+              "comp_type": "C",
+              "id": 1,
+              "nodes": [
+                1,
+                10
+              ],
+              "value": "1uF"
+            },
+            {
+              "comp_type": "C",
+              "id": 2,
+              "nodes": [
+                2,
+                11
+              ],
+              "value": "10uF"
+            },
+            {
+              "comp_type": "R",
+              "id": 5,
+              "nodes": [
+                11,
+                1
+              ],
+              "value": "270k"
+            },
+            {
+              "comp_type": "R",
+              "id": 6,
+              "nodes": [
+                21,
+                4
+              ],
+              "value": "100k"
+            }
+          ],
+          "vcc": 9.0,
+          "vee": -9.0
+        },
+        "descriptor": [
+          0.7496121170767543,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "mc_dev_db": null,
+        "generation": 4,
+        "fitness": 0.7496121170767543,
+        "obj_summary": "Gain@1kHz=1.00 (sc=0.99) | Zin@1kHz=476248.97 (sc=0.84) | DcOffset=0.45 (sc=0.45) | BOM_Count=9.00 (sc=0.17)"
+      },
+      {
+        "circuit": {
+          "nodes": [
+            4,
+            3,
+            21,
+            10,
+            11,
+            0,
+            2,
+            1
+          ],
+          "components": [
+            {
+              "comp_type": "Q",
+              "id": 1,
+              "nodes": [
+                3,
+                10,
+                2
+              ],
+              "value": "2N3904"
+            },
+            {
+              "comp_type": "R",
+              "id": 1,
+              "nodes": [
+                3,
+                11
+              ],
+              "value": "91k"
+            },
+            {
+              "comp_type": "R",
+              "id": 2,
+              "nodes": [
+                11,
+                21
+              ],
+              "value": "100k"
+            },
+            {
+              "comp_type": "R",
+              "id": 3,
+              "nodes": [
+                11,
+                10
+              ],
+              "value": "47k"
+            },
+            {
+              "comp_type": "R",
+              "id": 4,
+              "nodes": [
+                2,
+                4
+              ],
+              "value": "4.7k"
+            },
+            {
+              "comp_type": "C",
+              "id": 1,
+              "nodes": [
+                1,
+                10
+              ],
+              "value": "1uF"
+            },
+            {
+              "comp_type": "C",
+              "id": 2,
+              "nodes": [
+                2,
+                11
+              ],
+              "value": "10uF"
+            },
+            {
+              "comp_type": "R",
+              "id": 6,
+              "nodes": [
+                21,
+                4
+              ],
+              "value": "100k"
+            },
+            {
+              "comp_type": "Q",
+              "id": 2,
+              "nodes": [
+                3,
+                10,
+                2
+              ],
+              "value": "2N3904"
+            },
+            {
+              "comp_type": "R",
+              "id": 7,
+              "nodes": [
+                2,
+                4
+              ],
+              "value": "4.7k"
+            }
+          ],
+          "vcc": 9.0,
+          "vee": -9.0
+        },
+        "descriptor": [
+          0.7801332505833843,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "mc_dev_db": null,
+        "generation": 11,
+        "fitness": 0.7801332505833843,
+        "obj_summary": "Gain@1kHz=1.00 (sc=0.99) | Zin@1kHz=295777.92 (sc=0.74) | DcOffset=0.03 (sc=0.98) | BOM_Count=10.00 (sc=0.00)"
+      },
+      {
+        "circuit": {
+          "nodes": [
+            4,
+            3,
+            21,
+            10,
+            11,
+            0,
+            2,
+            1
+          ],
+          "components": [
+            {
+              "comp_type": "Q",
+              "id": 1,
+              "nodes": [
+                3,
+                10,
+                2
+              ],
+              "value": "2N3904"
+            },
+            {
+              "comp_type": "R",
+              "id": 1,
+              "nodes": [
+                3,
+                11
+              ],
+              "value": "110k"
+            },
+            {
+              "comp_type": "R",
+              "id": 2,
+              "nodes": [
+                11,
+                21
+              ],
+              "value": "91k"
+            },
+            {
+              "comp_type": "R",
+              "id": 3,
+              "nodes": [
+                11,
+                10
+              ],
+              "value": "47k"
+            },
+            {
+              "comp_type": "R",
+              "id": 4,
+              "nodes": [
+                2,
+                4
+              ],
+              "value": "4.7k"
+            },
+            {
+              "comp_type": "C",
+              "id": 1,
+              "nodes": [
+                1,
+                10
+              ],
+              "value": "1uF"
+            },
+            {
+              "comp_type": "C",
+              "id": 2,
+              "nodes": [
+                2,
+                11
+              ],
+              "value": "10uF"
+            },
+            {
+              "comp_type": "R",
+              "id": 5,
+              "nodes": [
+                11,
+                1
+              ],
+              "value": "270k"
+            },
+            {
+              "comp_type": "R",
+              "id": 6,
+              "nodes": [
+                21,
+                4
+              ],
+              "value": "100k"
+            }
+          ],
+          "vcc": 9.0,
+          "vee": -9.0
+        },
+        "descriptor": [
+          0.8417875113747016,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "mc_dev_db": null,
+        "generation": 12,
+        "fitness": 0.8417875113747016,
+        "obj_summary": "Gain@1kHz=1.00 (sc=0.99) | Zin@1kHz=477763.67 (sc=0.84) | DcOffset=0.01 (sc=1.00) | BOM_Count=9.00 (sc=0.17)"
+      }
+    ]
+  },
+  "population": [
+    {
+      "nodes": [
+        4,
+        3,
+        21,
+        10,
+        11,
+        0,
+        2,
+        1
+      ],
+      "components": [
+        {
+          "comp_type": "Q",
+          "id": 1,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            3,
+            11
+          ],
+          "value": "110k"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            11,
+            21
+          ],
+          "value": "91k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            11,
+            10
+          ],
+          "value": "47k"
+        },
+        {
+          "comp_type": "R",
+          "id": 4,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "1uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            11
+          ],
+          "value": "10uF"
+        },
+        {
+          "comp_type": "R",
+          "id": 5,
+          "nodes": [
+            11,
+            1
+          ],
+          "value": "270k"
+        },
+        {
+          "comp_type": "R",
+          "id": 6,
+          "nodes": [
+            21,
+            4
+          ],
+          "value": "100k"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        4,
+        3,
+        21,
+        10,
+        11,
+        0,
+        2,
+        1
+      ],
+      "components": [
+        {
+          "comp_type": "Q",
+          "id": 1,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            3,
+            11
+          ],
+          "value": "91k"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            11,
+            21
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            11,
+            10
+          ],
+          "value": "47k"
+        },
+        {
+          "comp_type": "R",
+          "id": 4,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "1uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            11
+          ],
+          "value": "10uF"
+        },
+        {
+          "comp_type": "R",
+          "id": 6,
+          "nodes": [
+            21,
+            4
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "Q",
+          "id": 2,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 7,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        },
+        {
+          "comp_type": "C",
+          "id": 3,
+          "nodes": [
+            10,
+            1
+          ],
+          "value": "270nF"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        4,
+        3,
+        21,
+        10,
+        11,
+        0,
+        2,
+        1
+      ],
+      "components": [
+        {
+          "comp_type": "Q",
+          "id": 1,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            3,
+            11
+          ],
+          "value": "91k"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            11,
+            21
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            11,
+            10
+          ],
+          "value": "47k"
+        },
+        {
+          "comp_type": "R",
+          "id": 4,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "1uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            11
+          ],
+          "value": "10uF"
+        },
+        {
+          "comp_type": "R",
+          "id": 6,
+          "nodes": [
+            21,
+            4
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "Q",
+          "id": 2,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 7,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        4,
+        3,
+        21,
+        10,
+        11,
+        0,
+        2,
+        1
+      ],
+      "components": [
+        {
+          "comp_type": "Q",
+          "id": 1,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            3,
+            11
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            11,
+            21
+          ],
+          "value": "91k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            11,
+            10
+          ],
+          "value": "47k"
+        },
+        {
+          "comp_type": "R",
+          "id": 4,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "1uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            11
+          ],
+          "value": "10uF"
+        },
+        {
+          "comp_type": "R",
+          "id": 5,
+          "nodes": [
+            11,
+            1
+          ],
+          "value": "270k"
+        },
+        {
+          "comp_type": "R",
+          "id": 6,
+          "nodes": [
+            21,
+            4
+          ],
+          "value": "100k"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        4,
+        3,
+        21,
+        10,
+        11,
+        0,
+        2,
+        1
+      ],
+      "components": [
+        {
+          "comp_type": "Q",
+          "id": 1,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            3,
+            11
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            11,
+            21
+          ],
+          "value": "91k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            11,
+            10
+          ],
+          "value": "43k"
+        },
+        {
+          "comp_type": "R",
+          "id": 4,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "1uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            11
+          ],
+          "value": "10uF"
+        },
+        {
+          "comp_type": "R",
+          "id": 5,
+          "nodes": [
+            11,
+            1
+          ],
+          "value": "270k"
+        },
+        {
+          "comp_type": "R",
+          "id": 6,
+          "nodes": [
+            21,
+            4
+          ],
+          "value": "100k"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        4,
+        3,
+        21,
+        22,
+        10,
+        11,
+        0,
+        2,
+        1
+      ],
+      "components": [
+        {
+          "comp_type": "Q",
+          "id": 1,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            3,
+            11
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            11,
+            4
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            11,
+            21
+          ],
+          "value": "47k"
+        },
+        {
+          "comp_type": "R",
+          "id": 4,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.3k"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "1uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            11
+          ],
+          "value": "10uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 3,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "33pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 5,
+          "nodes": [
+            3,
+            10
+          ],
+          "value": "620k"
+        },
+        {
+          "comp_type": "R",
+          "id": 6,
+          "nodes": [
+            21,
+            10
+          ],
+          "value": "47k"
+        },
+        {
+          "comp_type": "Q",
+          "id": 2,
+          "nodes": [
+            4,
+            21,
+            22
+          ],
+          "value": "2N3906"
+        },
+        {
+          "comp_type": "R",
+          "id": 7,
+          "nodes": [
+            22,
+            3
+          ],
+          "value": "4.7k"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        4,
+        3,
+        21,
+        10,
+        11,
+        0,
+        2,
+        1
+      ],
+      "components": [
+        {
+          "comp_type": "Q",
+          "id": 1,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            3,
+            11
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            11,
+            21
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            11,
+            10
+          ],
+          "value": "47k"
+        },
+        {
+          "comp_type": "R",
+          "id": 4,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "1uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            11
+          ],
+          "value": "10uF"
+        },
+        {
+          "comp_type": "R",
+          "id": 5,
+          "nodes": [
+            11,
+            1
+          ],
+          "value": "240k"
+        },
+        {
+          "comp_type": "R",
+          "id": 6,
+          "nodes": [
+            21,
+            4
+          ],
+          "value": "100k"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        4,
+        3,
+        21,
+        10,
+        11,
+        0,
+        2,
+        1
+      ],
+      "components": [
+        {
+          "comp_type": "Q",
+          "id": 1,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            3,
+            11
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            11,
+            21
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            11,
+            10
+          ],
+          "value": "43k"
+        },
+        {
+          "comp_type": "R",
+          "id": 4,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "1uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            11
+          ],
+          "value": "4.7uF"
+        },
+        {
+          "comp_type": "R",
+          "id": 5,
+          "nodes": [
+            0,
+            11
+          ],
+          "value": "360k"
+        },
+        {
+          "comp_type": "R",
+          "id": 6,
+          "nodes": [
+            21,
+            4
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 7,
+          "nodes": [
+            2,
+            10
+          ],
+          "value": "240k"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        4,
+        3,
+        21,
+        10,
+        11,
+        0,
+        2,
+        1
+      ],
+      "components": [
+        {
+          "comp_type": "Q",
+          "id": 1,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            3,
+            11
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            11,
+            21
+          ],
+          "value": "91k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            11,
+            10
+          ],
+          "value": "47k"
+        },
+        {
+          "comp_type": "R",
+          "id": 4,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "1uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            11
+          ],
+          "value": "10uF"
+        },
+        {
+          "comp_type": "R",
+          "id": 5,
+          "nodes": [
+            11,
+            1
+          ],
+          "value": "270k"
+        },
+        {
+          "comp_type": "R",
+          "id": 6,
+          "nodes": [
+            21,
+            4
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "D",
+          "id": 1,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "1N4148"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        4,
+        3,
+        21,
+        22,
+        10,
+        11,
+        0,
+        2,
+        1
+      ],
+      "components": [
+        {
+          "comp_type": "Q",
+          "id": 1,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            3,
+            11
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            11,
+            4
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            11,
+            21
+          ],
+          "value": "47k"
+        },
+        {
+          "comp_type": "R",
+          "id": 4,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "1uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            11
+          ],
+          "value": "10uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 3,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "33pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 5,
+          "nodes": [
+            3,
+            10
+          ],
+          "value": "620k"
+        },
+        {
+          "comp_type": "R",
+          "id": 6,
+          "nodes": [
+            21,
+            10
+          ],
+          "value": "47k"
+        },
+        {
+          "comp_type": "Q",
+          "id": 2,
+          "nodes": [
+            4,
+            21,
+            22
+          ],
+          "value": "2N3906"
+        },
+        {
+          "comp_type": "R",
+          "id": 7,
+          "nodes": [
+            22,
+            3
+          ],
+          "value": "4.7k"
+        },
+        {
+          "comp_type": "R",
+          "id": 8,
+          "nodes": [
+            0,
+            22
+          ],
+          "value": "560k"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        4,
+        3,
+        21,
+        22,
+        10,
+        11,
+        0,
+        2,
+        1
+      ],
+      "components": [
+        {
+          "comp_type": "Q",
+          "id": 1,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            3,
+            11
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            11,
+            4
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            11,
+            21
+          ],
+          "value": "47k"
+        },
+        {
+          "comp_type": "R",
+          "id": 4,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "1uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            11
+          ],
+          "value": "10uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 3,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "33pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 5,
+          "nodes": [
+            3,
+            10
+          ],
+          "value": "620k"
+        },
+        {
+          "comp_type": "R",
+          "id": 6,
+          "nodes": [
+            21,
+            10
+          ],
+          "value": "47k"
+        },
+        {
+          "comp_type": "Q",
+          "id": 2,
+          "nodes": [
+            4,
+            21,
+            22
+          ],
+          "value": "2N3906"
+        },
+        {
+          "comp_type": "R",
+          "id": 7,
+          "nodes": [
+            22,
+            3
+          ],
+          "value": "4.7k"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        4,
+        3,
+        21,
+        22,
+        10,
+        11,
+        0,
+        2,
+        1
+      ],
+      "components": [
+        {
+          "comp_type": "Q",
+          "id": 1,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            3,
+            11
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            11,
+            4
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            11,
+            21
+          ],
+          "value": "47k"
+        },
+        {
+          "comp_type": "R",
+          "id": 4,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "1uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            11
+          ],
+          "value": "10uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 3,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "27pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 5,
+          "nodes": [
+            3,
+            10
+          ],
+          "value": "620k"
+        },
+        {
+          "comp_type": "R",
+          "id": 6,
+          "nodes": [
+            21,
+            10
+          ],
+          "value": "47k"
+        },
+        {
+          "comp_type": "Q",
+          "id": 2,
+          "nodes": [
+            4,
+            21,
+            22
+          ],
+          "value": "2N3906"
+        },
+        {
+          "comp_type": "R",
+          "id": 7,
+          "nodes": [
+            22,
+            3
+          ],
+          "value": "4.7k"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        4,
+        3,
+        21,
+        10,
+        11,
+        0,
+        2,
+        1
+      ],
+      "components": [
+        {
+          "comp_type": "Q",
+          "id": 1,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            3,
+            11
+          ],
+          "value": "91k"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            11,
+            21
+          ],
+          "value": "110k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            11,
+            10
+          ],
+          "value": "47k"
+        },
+        {
+          "comp_type": "R",
+          "id": 4,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "2.2uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            11
+          ],
+          "value": "10uF"
+        },
+        {
+          "comp_type": "R",
+          "id": 6,
+          "nodes": [
+            21,
+            4
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "Q",
+          "id": 2,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 7,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        4,
+        3,
+        21,
+        10,
+        11,
+        0,
+        2,
+        1
+      ],
+      "components": [
+        {
+          "comp_type": "Q",
+          "id": 1,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            3,
+            11
+          ],
+          "value": "91k"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            11,
+            21
+          ],
+          "value": "110k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            11,
+            10
+          ],
+          "value": "47k"
+        },
+        {
+          "comp_type": "R",
+          "id": 4,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "1uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            11
+          ],
+          "value": "10uF"
+        },
+        {
+          "comp_type": "R",
+          "id": 6,
+          "nodes": [
+            21,
+            4
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "Q",
+          "id": 2,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 7,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        4,
+        3,
+        21,
+        10,
+        11,
+        0,
+        2,
+        1
+      ],
+      "components": [
+        {
+          "comp_type": "Q",
+          "id": 1,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            3,
+            11
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            11,
+            21
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            11,
+            10
+          ],
+          "value": "47k"
+        },
+        {
+          "comp_type": "R",
+          "id": 4,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "1uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            11
+          ],
+          "value": "10uF"
+        },
+        {
+          "comp_type": "R",
+          "id": 5,
+          "nodes": [
+            11,
+            1
+          ],
+          "value": "270k"
+        },
+        {
+          "comp_type": "R",
+          "id": 6,
+          "nodes": [
+            21,
+            4
+          ],
+          "value": "100k"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        4,
+        3,
+        21,
+        10,
+        11,
+        0,
+        2,
+        1
+      ],
+      "components": [
+        {
+          "comp_type": "Q",
+          "id": 1,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            3,
+            11
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            11,
+            21
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            11,
+            10
+          ],
+          "value": "47k"
+        },
+        {
+          "comp_type": "R",
+          "id": 4,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.3k"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "1uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            11
+          ],
+          "value": "10uF"
+        },
+        {
+          "comp_type": "R",
+          "id": 5,
+          "nodes": [
+            11,
+            1
+          ],
+          "value": "270k"
+        },
+        {
+          "comp_type": "R",
+          "id": 6,
+          "nodes": [
+            21,
+            4
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "C",
+          "id": 3,
+          "nodes": [
+            10,
+            2
+          ],
+          "value": "27pF"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        4,
+        3,
+        10,
+        11,
+        0,
+        2,
+        1
+      ],
+      "components": [
+        {
+          "comp_type": "Q",
+          "id": 1,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            3,
+            11
+          ],
+          "value": "91k"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            11,
+            4
+          ],
+          "value": "110k"
+        },
+        {
+          "comp_type": "R",
+          "id": 4,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "2.2uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            11
+          ],
+          "value": "10uF"
+        },
+        {
+          "comp_type": "R",
+          "id": 6,
+          "nodes": [
+            10,
+            1
+          ],
+          "value": "430"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        4,
+        3,
+        10,
+        11,
+        0,
+        2,
+        1
+      ],
+      "components": [
+        {
+          "comp_type": "Q",
+          "id": 1,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            3,
+            11
+          ],
+          "value": "91k"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            11,
+            4
+          ],
+          "value": "110k"
+        },
+        {
+          "comp_type": "R",
+          "id": 4,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "1uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            11
+          ],
+          "value": "10uF"
+        },
+        {
+          "comp_type": "R",
+          "id": 6,
+          "nodes": [
+            10,
+            1
+          ],
+          "value": "430"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        4,
+        3,
+        21,
+        10,
+        11,
+        0,
+        2,
+        1
+      ],
+      "components": [
+        {
+          "comp_type": "Q",
+          "id": 1,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            3,
+            11
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            11,
+            21
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            11,
+            10
+          ],
+          "value": "47k"
+        },
+        {
+          "comp_type": "R",
+          "id": 4,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "1uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            11
+          ],
+          "value": "4.7uF"
+        },
+        {
+          "comp_type": "R",
+          "id": 5,
+          "nodes": [
+            11,
+            1
+          ],
+          "value": "270k"
+        },
+        {
+          "comp_type": "R",
+          "id": 6,
+          "nodes": [
+            21,
+            4
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "C",
+          "id": 3,
+          "nodes": [
+            10,
+            2
+          ],
+          "value": "27pF"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        4,
+        3,
+        21,
+        10,
+        11,
+        0,
+        2,
+        1
+      ],
+      "components": [
+        {
+          "comp_type": "Q",
+          "id": 1,
+          "nodes": [
+            3,
+            10,
+            2
+          ],
+          "value": "2N3904"
+        },
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            3,
+            11
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            11,
+            21
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            11,
+            10
+          ],
+          "value": "47k"
+        },
+        {
+          "comp_type": "R",
+          "id": 4,
+          "nodes": [
+            2,
+            4
+          ],
+          "value": "4.7k"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            1,
+            10
+          ],
+          "value": "1uF"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            11
+          ],
+          "value": "10uF"
+        },
+        {
+          "comp_type": "R",
+          "id": 5,
+          "nodes": [
+            11,
+            1
+          ],
+          "value": "270k"
+        },
+        {
+          "comp_type": "R",
+          "id": 6,
+          "nodes": [
+            21,
+            4
+          ],
+          "value": "100k"
+        },
+        {
+          "comp_type": "C",
+          "id": 3,
+          "nodes": [
+            10,
+            2
+          ],
+          "value": "27pF"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+* Characterization Netlist: Bench Ref
+.include "tl072.sub"
+.model 1N4148 D(is=2.52n rs=0.568 n=1.752 cjo=4p m=0.4 tt=20n)
+V_in 1 0 dc 0 ac 1 sin(0 0.1 1k)
+V_cc 3 0 dc 9.00
+V_ee 4 0 dc -9.00
+R1    1 10 10k
+R2    10 20 11k
+C1    10 2 10pF
+C2    20 0 15.9nF
+X1    20 2 3 4 2 TL072
+R4    2 20 270k
+D1    1 20 1N4148
+C3    2 1 560nF
+C4    2 20 150nF
+C_stray_8000 1 0 22.00pF
+C_stray_8001 2 0 22.00pF
+C_stray_8002 10 0 22.00pF
+C_stray_8003 20 0 22.00pF
+.control
+op
+print allv
+ac dec 50 10 100k
+wrdata ac_out.txt v(2)
+tran 10us 5ms
+wrdata tran_small.txt v(2) v(1)
+alter @v_in[sin] = [ 0 2.0 1k ]
+tran 10us 5ms
+wrdata tran_large.txt v(2) v(1)
+alter @v_in[sin] = [ 0 0 0 ]
+tran 20us 10ms
+wrdata tran_zero.txt v(2)
+quit
+.endc
+.end

@@ -1,0 +1,65 @@
+name = "buffer"
+description = "High-Z Unity-Gain Buffer with 10k Load Driving (Discrete Hunting)"
+feasibility_max_dc = 2.0
+feasibility_rail_margin = 0.5
+allow_opamps = false
+
+# 1. Gain Probe: Unity Gain under heavy 10k resistive load
+[[probes]]
+name = "Gain@1kHz"
+probe_type = "Gain"
+kind = "Closeness"
+want = 1.0
+soft = 0.5
+weight = 3.0
+
+[probes.condition]
+freq = 1000.0
+vin = 0.1
+r_load = 10000.0
+
+# 2. Input Impedance Probe: High-Z Target (1 MOhm)
+# Note: 1kHz stray reactance for 22pF breadboard is 7.23 MOhm ceiling.
+# Target 1 MOhm requires bootstrap topology to surpass simple bias divider (47k).
+[[probes]]
+name = "Zin@1kHz"
+probe_type = "Zin"
+kind = "Greater"
+want = 1000000.0
+soft = 10000.0
+weight = 3.5
+
+[probes.condition]
+freq = 1000.0
+vin = 0.1
+r_load = 10000.0
+
+# 3. DC Offset Probe: Low DC offset at output (< 20mV ideal, < 800mV soft)
+[[probes]]
+name = "DcOffset"
+probe_type = "DcOffset"
+kind = "Lesser"
+want = 0.02
+soft = 0.80
+weight = 1.5
+
+[probes.condition]
+freq = 0.0
+vin = 0.0
+r_load = 10000.0
+
+# 4. BOM Count Probe: Discrete minimum is 4-5 components (BJT + 2 bias R + RE + Cin)
+[[probes]]
+name = "BOM_Count"
+probe_type = "Bom"
+kind = "Lesser"
+want = 4.0
+soft = 10.0
+weight = 1.0
+
+[probes.condition]
+freq = 0.0
+vin = 0.0
+r_load = 0.0
+
+
