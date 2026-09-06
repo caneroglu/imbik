@@ -1,8 +1,9 @@
 use crate::circuit::{Circuit, Component, NODE_GND, NODE_IN, NODE_OUT, NODE_VCC, NODE_VEE};
 use crate::constraints::check;
 use crate::fitness::{
-    evaluate_preset, extract_ac_features, extract_behavior_descriptor, extract_nonlinear_features,
-    extract_oscillation_features, to_characterization_netlist, BehaviorDescriptor, NoveltyArchive,
+    evaluate_noise, evaluate_preset, extract_ac_features, extract_behavior_descriptor,
+    extract_nonlinear_features, extract_oscillation_features, to_characterization_netlist,
+    BehaviorDescriptor, NoveltyArchive,
 };
 use crate::loot::{describe_character, evaluate_rarity};
 use crate::mutate::mutate;
@@ -483,6 +484,17 @@ impl EvolutionEngine {
                             .ok()
                             .map(|rep| rep.max_deviation_db);
 
+                            let r_source = preset.probes.iter()
+                                .find(|p| p.condition.r_source > 0.0)
+                                .map(|p| p.condition.r_source)
+                                .unwrap_or(600.0);
+                            let r_load = preset.probes.iter()
+                                .find(|p| p.condition.r_load > 0.0)
+                                .map(|p| p.condition.r_load)
+                                .unwrap_or(10000.0);
+
+                            let noise_summary = evaluate_noise(&cand.circuit, r_source, r_load, stray_pf, timeout).ok();
+
                             let effective_min_dist = if is_breakthrough { 0.0 } else { self.config.min_novelty_dist };
                             let added = self.archive.maybe_add_with_meta(
                                 cand.circuit.clone(),
@@ -494,6 +506,7 @@ impl EvolutionEngine {
                                 gen_idx,
                                 Some(cand.fitness_score),
                                 Some(cand_summary),
+                                noise_summary.clone(),
                             );
 
                             if added {
@@ -503,20 +516,26 @@ impl EvolutionEngine {
                                 let mc_str = mc_dev_db
                                     .map(|v| format!("{:.1}dB", v))
                                     .unwrap_or_else(|| "--".to_string());
+                                let noise_str = match &noise_summary {
+                                    Some(ns) => format!("{:.1} nV/√Hz", ns.inoise_spot_1k),
+                                    None => "--".to_string(),
+                                };
                                 println!(
-                                    "  {} DROP  #{} | fit={:.4} | nn={:.3} mc={} | {}",
+                                    "  {} DROP  #{} | fit={:.4} | noise={:<11} | nn={:.3} mc={} | {}",
                                     rarity.colored_label(),
                                     self.archive.len() - 1,
                                     cand.fitness_score,
+                                    noise_str,
                                     nn_report,
                                     mc_str,
                                     describe_character(&desc)
                                 );
                                 log::info!(
-                                    "Discovery drop #{} [{:?}] fit={:.4}, mc={}",
+                                    "Discovery drop #{} [{:?}] fit={:.4}, noise={}, mc={}",
                                     self.archive.len() - 1,
                                     rarity,
                                     cand.fitness_score,
+                                    noise_str,
                                     mc_str
                                 );
                             }
@@ -722,13 +741,19 @@ impl EvolutionEngine {
                         Err(_) => None,
                     };
 
-                    self.archive.maybe_add(
+                    let noise_summary = evaluate_noise(&res.circuit, 600.0, 10000.0, stray_pf, timeout).ok();
+
+                    self.archive.maybe_add_with_meta(
                         res.circuit.clone(),
                         desc,
                         self.config.novelty_threshold,
                         self.config.k_neighbors,
                         self.config.min_novelty_dist,
                         dev_db,
+                        gen_idx,
+                        None,
+                        None,
+                        noise_summary,
                     );
                 }
 

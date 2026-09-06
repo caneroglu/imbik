@@ -1,0 +1,86 @@
+# Preset: Ultra Low-Noise Preamplifier
+name = "low_noise_preamp"
+description = "Ultra Low-Noise Discrete Preamplifier (< 3.5 nV/√Hz input noise, Gain >= 10, Zin >= 50k)"
+feasibility_max_dc = 2.5
+feasibility_rail_margin = 0.5
+allow_opamps = false
+
+# 1. Voltage Gain Probe (> 20 dB / 10x)
+[[probes]]
+name = "Gain@1kHz"
+probe_type = "Gain"
+kind = "Greater"
+want = 10.0
+soft = 1.0
+weight = 2.5
+require = true
+
+[probes.condition]
+freq = 1000.0
+vin = 0.01
+r_load = 10000.0
+r_source = 600.0
+
+# 2. Input-Referred Noise Spectral Density Probe (< 3.5 nV/√Hz @ 1kHz)
+[[probes]]
+name = "Noise@1kHz"
+probe_type = "Noise"
+kind = "Lesser"
+want = 3.5
+soft = 25.0
+weight = 4.0
+require = true
+
+[probes.condition]
+freq = 1000.0
+vin = 0.0
+r_load = 10000.0
+r_source = 600.0
+
+# 3. Input Impedance Probe (> 50k)
+[[probes]]
+name = "Zin@1kHz"
+probe_type = "Zin"
+kind = "Greater"
+want = 50000.0
+soft = 2000.0
+weight = 2.0
+require = false
+
+[probes.condition]
+freq = 1000.0
+vin = 0.01
+r_load = 10000.0
+r_source = 600.0
+
+# 4. DC Offset Probe (< 50 mV)
+[[probes]]
+name = "DcOffset"
+probe_type = "DcOffset"
+kind = "Lesser"
+want = 0.05
+soft = 1.50
+weight = 1.5
+require = true
+
+[probes.condition]
+freq = 1000.0
+vin = 0.0
+r_load = 10000.0
+r_source = 600.0
+
+# 5. Bill of Materials / Parsimony
+[[probes]]
+name = "BOM_Count"
+probe_type = "Bom"
+kind = "Lesser"
+want = 4.0
+soft = 12.0
+weight = 1.0
+require = false
+
+[probes.condition]
+freq = 1000.0
+vin = 0.0
+r_load = 10000.0
+r_source = 600.0

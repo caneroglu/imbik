@@ -21,6 +21,13 @@ pub enum ProbeType {
     Zout,
     DcOffset,
     Bom,
+    Noise,      // Input-referred noise density @ target frequency in nV/√Hz
+    NoiseFig,   // Noise Figure in dB
+    NoiseTotal, // Integrated RMS input noise across audio band in µV RMS
+}
+
+fn default_r_source() -> f64 {
+    600.0
 }
 
 /// Test conditions applied during measurement
@@ -29,6 +36,8 @@ pub struct TestCondition {
     pub freq: f64,
     pub vin: f64,
     pub r_load: f64,
+    #[serde(default = "default_r_source")]
+    pub r_source: f64,
 }
 
 impl Default for TestCondition {
@@ -37,6 +46,7 @@ impl Default for TestCondition {
             freq: 1000.0,
             vin: 0.1,
             r_load: 10000.0,
+            r_source: 600.0,
         }
     }
 }
@@ -102,8 +112,11 @@ impl ProbeTarget {
                 if val >= self.soft {
                     return 0.0;
                 }
-                // Logarithmic scaling for large dynamic ranges (e.g. impedance)
-                if (self.probe_type == ProbeType::Zin || self.probe_type == ProbeType::Zout)
+                // Logarithmic scaling for large dynamic ranges (e.g. impedance, noise)
+                if (self.probe_type == ProbeType::Zin
+                    || self.probe_type == ProbeType::Zout
+                    || self.probe_type == ProbeType::Noise
+                    || self.probe_type == ProbeType::NoiseTotal)
                     && self.want > 0.0
                     && self.soft > 0.0
                 {
@@ -218,7 +231,86 @@ impl Preset {
 
         match name_or_path.to_lowercase().as_str() {
             "buffer" | "highz_buffer" => Ok(Self::buffer_default()),
-            other => Err(format!("Unknown preset: '{}'. Available built-in: 'buffer'", other)),
+            "low_noise_preamp" | "low_noise" | "preamp" => Ok(Self::low_noise_preamp_default()),
+            other => Err(format!("Unknown preset: '{}'. Available built-in: 'buffer', 'low_noise_preamp'", other)),
+        }
+    }
+
+    /// Standard Low-Noise Preamplifier preset (Discrete BJT, Zin >= 50k, Gain >= 10, Noise <= 3.5 nV/√Hz @ 1kHz)
+    pub fn low_noise_preamp_default() -> Self {
+        Self {
+            name: "low_noise_preamp".to_string(),
+            description: "Ultra Low-Noise Preamplifier with < 3.5 nV/√Hz floor (Discrete Hunting)".to_string(),
+            feasibility_max_dc: 2.5,
+            feasibility_rail_margin: 0.5,
+            allow_opamps: false,
+            probes: vec![
+                ProbeTarget {
+                    name: "Gain@1kHz".to_string(),
+                    probe_type: ProbeType::Gain,
+                    condition: TestCondition {
+                        freq: 1000.0,
+                        vin: 0.01,
+                        r_load: 10000.0,
+                        r_source: 600.0,
+                    },
+                    kind: ProbeKind::Greater,
+                    want: 10.0,
+                    soft: 1.0,
+                    weight: 2.5,
+                    is_required: true,
+                },
+                ProbeTarget {
+                    name: "Noise@1kHz".to_string(),
+                    probe_type: ProbeType::Noise,
+                    condition: TestCondition {
+                        freq: 1000.0,
+                        vin: 0.0,
+                        r_load: 10000.0,
+                        r_source: 600.0,
+                    },
+                    kind: ProbeKind::Lesser,
+                    want: 3.5,
+                    soft: 25.0,
+                    weight: 4.0,
+                    is_required: true,
+                },
+                ProbeTarget {
+                    name: "Zin@1kHz".to_string(),
+                    probe_type: ProbeType::Zin,
+                    condition: TestCondition {
+                        freq: 1000.0,
+                        vin: 0.01,
+                        r_load: 10000.0,
+                        r_source: 600.0,
+                    },
+                    kind: ProbeKind::Greater,
+                    want: 50_000.0,
+                    soft: 2_000.0,
+                    weight: 2.0,
+                    is_required: false,
+                },
+                ProbeTarget {
+                    name: "DcOffset".to_string(),
+                    probe_type: ProbeType::DcOffset,
+                    condition: TestCondition::default(),
+                    kind: ProbeKind::Lesser,
+                    want: 0.05,
+                    soft: 1.50,
+                    weight: 1.5,
+                    is_required: true,
+                },
+                ProbeTarget {
+                    name: "BOM_Count".to_string(),
+                    probe_type: ProbeType::Bom,
+                    condition: TestCondition::default(),
+                    kind: ProbeKind::Lesser,
+                    want: 4.0,
+                    soft: 12.0,
+                    weight: 1.0,
+                    is_required: false,
+                },
+            ],
         }
     }
 
@@ -238,6 +330,7 @@ impl Preset {
                         freq: 1000.0,
                         vin: 0.1,
                         r_load: 10000.0,
+                        r_source: 600.0,
                     },
                     kind: ProbeKind::Closeness,
                     want: 1.0,
@@ -252,6 +345,7 @@ impl Preset {
                         freq: 1000.0,
                         vin: 0.1,
                         r_load: 10000.0,
+                        r_source: 600.0,
                     },
                     kind: ProbeKind::Greater,
                     want: 1_000_000.0, // 1 MegOhm (Bootstrap target, well below 7.23M stray ceiling)

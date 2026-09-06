@@ -1,6 +1,7 @@
 use crate::circuit::{Circuit, ComponentType, NODE_GND, NODE_IN, NODE_OUT, NODE_VCC, NODE_VEE};
 use crate::engine::CheckpointData;
 use crate::fitness::{euclidean_distance, BehaviorDescriptor};
+use crate::spice::NoiseSummary;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -46,8 +47,20 @@ pub fn render_sparkline(d: &BehaviorDescriptor) -> String {
     s
 }
 
-/// Derive a human-readable, colorful character tag from the 11D descriptor
+/// Derive a human-readable, colorful character tag from the 11D descriptor and optional noise profile
 pub fn describe_character(d: &BehaviorDescriptor) -> String {
+    describe_character_with_noise(d, None)
+}
+
+/// Derive a human-readable character tag taking both 11D dynamics and analog noise into account
+pub fn describe_character_with_noise(d: &BehaviorDescriptor, noise: Option<&NoiseSummary>) -> String {
+    if let Some(ns) = noise {
+        let en_nv = ns.inoise_spot_1k;
+        if en_nv > 0.0 && en_nv <= 3.5 && d[9] <= 0.02 {
+            return format!("🤫 Ultra Düşük Gürültü ({:.1} nV/√Hz)", en_nv);
+        }
+    }
+
     if d[9] > 0.02 {
         let f_khz = 10f64.powf(d[10] * 5.0) / 1000.0;
         if f_khz > 20.0 {
@@ -68,6 +81,15 @@ pub fn describe_character(d: &BehaviorDescriptor) -> String {
     } else if d[0] > 0.5 {
         let fc = 10f64.powf(d[1] * 5.0);
         format!("🎛️ Aktif Filtre (fc ≈ {:.0} Hz)", fc)
+    } else if let Some(ns) = noise {
+        let en_nv = ns.inoise_spot_1k;
+        if en_nv > 0.0 && en_nv <= 8.0 {
+            format!("🎧 Düşük Gürültülü Kat ({:.1} nV/√Hz)", en_nv)
+        } else if d[0] < 0.5 && d[5] < 0.005 && d[4] < 0.01 {
+            "〰️ Geniş Bant Lineer Kat".to_string()
+        } else {
+            "🎚️ Analog Dalga Şekillendirici".to_string()
+        }
     } else if d[0] < 0.5 && d[5] < 0.005 && d[4] < 0.01 {
         "〰️ Geniş Bant Lineer Kat".to_string()
     } else {
@@ -97,18 +119,8 @@ pub fn summarize_components(c: &Circuit) -> String {
 
 /// Determine circuit rarity from its nearest-neighbor distance, Monte Carlo environmental deviation,
 /// and behavioral functionality.
-///
-/// Standards:
-/// - COMMON: Classic topology clone, weak character, high tolerance spread, or ultrasonic defect.
-/// - RARE: Distinctive acoustic or filter behavior, acceptable breadboard tolerance (mc <= 4.0 dB).
-/// - EPIC: Truly novel topology, strictly functional, and highly resistant to analog environmental
-///   dirt / component spread (mc <= 2.5 dB), zero ultrasonic parasitic oscillation.
-/// - LEGENDARY: Literature-grade analog breakthrough! Extreme novelty (nn >= 0.70), bulletproof
-///   stability (mc <= 1.5 dB), rich musical/filter character, or physically verified on hardware.
 pub fn evaluate_rarity(nn_dist: f64, mc_dev_db: Option<f64>, desc: &BehaviorDescriptor) -> Rarity {
     // 1. Parasitic Instability Check:
-    // If autonomous oscillation is detected (d[9] > 0.02) and frequency is ultrasonic (> 20 kHz),
-    // it's an unstable ringing artifact from breadboard parasitics, NOT a clean audio oscillator.
     let has_osc = desc[9] > 0.02;
     let f_osc_hz = if has_osc {
         10f64.powf(desc[10] * 5.0)
@@ -118,15 +130,11 @@ pub fn evaluate_rarity(nn_dist: f64, mc_dev_db: Option<f64>, desc: &BehaviorDesc
     let is_ultrasonic_parasite = has_osc && f_osc_hz > 20_000.0;
 
     // 2. Functionality Checks:
-    // - Audio Filter: has_filter flag active and cutoff in audio band (20Hz - 20kHz) or notable resonance
     let has_filter = desc[0] > 0.5;
     let fc_hz = if has_filter { 10f64.powf(desc[1] * 5.0) } else { 0.0 };
     let audio_filter = has_filter && ((fc_hz >= 20.0 && fc_hz <= 20_000.0) || desc[3] > 0.20);
 
-    // - Musical Non-Linearity: meaningful harmonic generation or dynamic compression
     let has_harmonics = (desc[5] > 0.03) || (desc[6] > 0.03) || (desc[7] > 0.03) || (desc[8] > 0.15);
-
-    // - True Audio Autonomous Oscillator: oscillation within human hearing range
     let audio_osc = has_osc && (f_osc_hz >= 20.0 && f_osc_hz <= 20_000.0);
 
     let is_functional = (audio_filter || has_harmonics || audio_osc) && !is_ultrasonic_parasite;
@@ -189,6 +197,7 @@ pub struct ArchiveItemView {
     pub descriptor: BehaviorDescriptor,
     pub nn_dist: f64,
     pub mc_dev_db: Option<f64>,
+    pub noise_summary: Option<NoiseSummary>,
     pub rarity: Rarity,
     pub generation: usize,
     pub fitness: Option<f64>,
@@ -236,6 +245,7 @@ pub fn load_archive_views(checkpoint_path: &Path) -> Result<Vec<ArchiveItemView>
         let generation = entry.generation;
         let fitness = entry.fitness;
         let obj_summary = entry.obj_summary;
+        let noise_summary = entry.noise_summary;
 
         views.push(ArchiveItemView {
             id: i,
@@ -243,6 +253,7 @@ pub fn load_archive_views(checkpoint_path: &Path) -> Result<Vec<ArchiveItemView>
             descriptor: entry.descriptor,
             nn_dist: nn,
             mc_dev_db: mc,
+            noise_summary,
             rarity,
             generation,
             fitness,
@@ -265,15 +276,15 @@ pub fn list_archive(checkpoint_path: &Path) -> Result<(), Box<dyn std::error::Er
     // Sort by nearest neighbor distance (highest novelty / rarest first)
     items.sort_by(|a, b| b.nn_dist.partial_cmp(&a.nn_dist).unwrap_or(std::cmp::Ordering::Equal));
 
-    println!("\n========================================================================================================================");
+    println!("\n========================================================================================================================================");
     println!("  🏆 İMBİK ANALOG LOOT TABLE — ARCHIVE DISCOVERIES (Total: {})", items.len());
     println!("  Source: {:?}", checkpoint_path);
-    println!("========================================================================================================================");
+    println!("========================================================================================================================================");
     println!(
-        " {:<4} | {:<5} | {:<10} | {:<10} | {:<12} | {:<16} | {:<8} | {:<6} | {:<28}",
-        "ID", "GEN", "FITNESS", "RARITY", "SPARK (11D)", "PARTS (R C D X)", "NN DIST", "MC DEV", "CHARACTER SIGNATURE"
+        " {:<4} | {:<5} | {:<8} | {:<10} | {:<12} | {:<15} | {:<11} | {:<7} | {:<6} | {:<28}",
+        "ID", "GEN", "FITNESS", "RARITY", "SPARK (11D)", "PARTS", "NOISE (1k)", "NN DIST", "MC DEV", "CHARACTER SIGNATURE"
     );
-    println!("------------------------------------------------------------------------------------------------------------------------");
+    println!("----------------------------------------------------------------------------------------------------------------------------------------");
 
     let mut legendary_count = 0;
     let mut epic_count = 0;
@@ -290,7 +301,7 @@ pub fn list_archive(checkpoint_path: &Path) -> Result<(), Box<dyn std::error::Er
 
         let spark = render_sparkline(&item.descriptor);
         let comps = summarize_components(&item.circuit);
-        let char_tag = describe_character(&item.descriptor);
+        let char_tag = describe_character_with_noise(&item.descriptor, item.noise_summary.as_ref());
         let mc_str = match item.mc_dev_db {
             Some(dev) => format!("{:.1}dB", dev),
             None => "--".to_string(),
@@ -304,28 +315,40 @@ pub fn list_archive(checkpoint_path: &Path) -> Result<(), Box<dyn std::error::Er
         } else {
             "--".to_string()
         };
+        let noise_str = match item.noise_summary.as_ref() {
+            Some(ns) => {
+                let nv = ns.inoise_spot_1k;
+                if nv < 1000.0 {
+                    format!("{:.1}nV/√Hz", nv)
+                } else {
+                    format!("{:.1}µV/√Hz", nv / 1000.0)
+                }
+            }
+            None => "--".to_string(),
+        };
 
         println!(
-            " #{:<3} | {:<5} | {:<10} | {:<19} | \x1b[33m{:<12}\x1b[0m | {:<16} | {:.4}  | {:<6} | {}",
+            " #{:<3} | {:<5} | {:<8} | {:<19} | \x1b[33m{:<12}\x1b[0m | {:<15} | {:<11} | {:.4}  | {:<6} | {}",
             item.id,
             gen_str,
             fit_str,
             item.rarity.colored_label(),
             spark,
             comps,
+            noise_str,
             item.nn_dist,
             mc_str,
             char_tag
         );
     }
 
-    println!("------------------------------------------------------------------------------------------------------------------------");
+    println!("----------------------------------------------------------------------------------------------------------------------------------------");
     println!(
         " Summary: \x1b[1;33m{} LEGENDARY\x1b[0m, \x1b[1;35m{} EPIC\x1b[0m, \x1b[1;36m{} RARE\x1b[0m, \x1b[90m{} COMMON\x1b[0m.",
         legendary_count, epic_count, rare_count, common_count
     );
     println!(" Tips: Use `imbik show <id>` to inspect details, or `imbik bench <id>` to export breadboard package.");
-    println!("========================================================================================================================\n");
+    println!("========================================================================================================================================\n");
 
     Ok(())
 }
@@ -354,7 +377,7 @@ pub fn show_circuit(checkpoint_path: &Path, circuit_id: usize) -> Result<(), Box
         println!("- **Objective Breakdown**: {}", summary);
     }
     println!("- **Rarity Tier**: {}", item.rarity.colored_label());
-    println!("- **Character Tag**: {}", describe_character(d));
+    println!("- **Character Tag**: {}", describe_character_with_noise(d, item.noise_summary.as_ref()));
     println!("- **Nearest Neighbor Distance**: {:.4}", item.nn_dist);
     println!(
         "- **Worst-Case Monte Carlo Deviation**: {}",
@@ -362,6 +385,27 @@ pub fn show_circuit(checkpoint_path: &Path, circuit_id: usize) -> Result<(), Box
             .map(|v| format!("{:.2} dB", v))
             .unwrap_or_else(|| "N/A".to_string())
     );
+    if let Some(ref ns) = item.noise_summary {
+        println!("\n## 🔬 Analog Noise Performance (SPICE .NOISE)");
+        println!("- **Input-Referred Density (1 kHz)**:   {:.2} nV/√Hz", ns.inoise_spot_1k);
+        println!("- **Integrated Audio Input Noise**:     {:.2} µV RMS (20 Hz - 20 kHz)", ns.inoise_total_rms);
+        println!("- **Integrated Audio Output Noise**:    {:.2} µV RMS (20 Hz - 20 kHz)", ns.onoise_total_rms);
+        if let Some(nf) = ns.noise_figure_db {
+            println!("- **Noise Figure (NF)**:                {:.2} dB", nf);
+        }
+        if let Some(fc) = ns.corner_freq {
+            println!("- **1/f Flicker Corner**:               {:.1} Hz", fc);
+        }
+        if ns.inoise_spot_1k < 3.5 {
+            println!("- **Noise Quality Tier**:               \x1b[1;32m★ STUDIO ULTRA-LOW NOISE\x1b[0m (Sub-Johnson 600Ω Floor)");
+        } else if ns.inoise_spot_1k < 10.0 {
+            println!("- **Noise Quality Tier**:               \x1b[1;36m★ LOW NOISE PRO AUDIO\x1b[0m");
+        } else if ns.inoise_spot_1k < 50.0 {
+            println!("- **Noise Quality Tier**:               \x1b[33mSTANDARD ANALOG STAGE\x1b[0m");
+        } else {
+            println!("- **Noise Quality Tier**:               \x1b[90mHIGH NOISE\x1b[0m");
+        }
+    }
     println!("- **Total Components**: {}", item.circuit.components.len());
     println!("- **Supply Rails**: ±{:.1}V (VCC=+{:.1}V, VEE=-{:.1}V, GND=0V)", item.circuit.vcc, item.circuit.vcc, item.circuit.vee.abs());
 

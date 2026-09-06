@@ -307,6 +307,113 @@ pub fn to_probe_netlist(circuit: &Circuit, preset: &Preset, stray_cap_pf: f64) -
     netlist
 }
 
+/// Generate SPICE netlist for noise spectral density & integrated noise analysis
+pub fn to_noise_netlist(
+    circuit: &Circuit,
+    title: &str,
+    r_source: f64,
+    r_load: f64,
+    f_start: f64,
+    f_stop: f64,
+    stray_cap_pf: f64,
+) -> String {
+    let mut netlist = String::new();
+
+    netlist.push_str(&format!("* Noise Analysis: {}\n", title));
+    netlist.push_str(standard_spice_headers());
+
+    // Power rails
+    netlist.push_str(&format!("V_cc {} {} dc {:.2}\n", NODE_VCC, NODE_GND, circuit.vcc));
+    netlist.push_str(&format!("V_ee {} {} dc {:.2}\n", NODE_VEE, NODE_GND, circuit.vee));
+
+    // Input signal source with configurable source impedance
+    if r_source > 0.001 {
+        // Node 100 is internal ideal AC source node, connected to input node 1 via R_source
+        netlist.push_str("V_in 100 0 dc 0 ac 1\n");
+        netlist.push_str(&format!("R_source 100 {} {:.4}\n", NODE_IN, r_source));
+    } else {
+        netlist.push_str(&format!("V_in {} {} dc 0 ac 1\n", NODE_IN, NODE_GND));
+    }
+
+    // Circuit components
+    for comp in &circuit.components {
+        let prefix = comp.comp_type.to_char();
+        let nodes_str = comp
+            .nodes
+            .iter()
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        netlist.push_str(&format!("{}{:<4} {} {}\n", prefix, comp.id, nodes_str, comp.value));
+    }
+
+    // Load resistance on output node
+    if r_load > 0.001 {
+        netlist.push_str(&format!("R_noise_load {} {} {:.2}\n", NODE_OUT, NODE_GND, r_load));
+    }
+
+    // Stray capacitances if specified
+    if stray_cap_pf > 0.0 {
+        let mut id_counter = 8000;
+        for &node in &circuit.nodes {
+            if node != NODE_GND && node != NODE_VCC && node != NODE_VEE {
+                netlist.push_str(&format!(
+                    "C_stray_{} {} {} {:.2}pF\n",
+                    id_counter, node, NODE_GND, stray_cap_pf
+                ));
+                id_counter += 1;
+            }
+        }
+    }
+
+    // Noise analysis control block
+    netlist.push_str(".control\n");
+    netlist.push_str("op\n");
+    netlist.push_str("print allv\n");
+    netlist.push_str(&format!("noise v({}) v_in dec 50 {:.1} {:.1}\n", NODE_OUT, f_start, f_stop));
+    netlist.push_str("print inoise_total onoise_total\n");
+    netlist.push_str("setplot noise1\n");
+    netlist.push_str("wrdata noise_out.txt onoise_spectrum inoise_spectrum\n");
+    netlist.push_str("quit\n");
+    netlist.push_str(".endc\n");
+    netlist.push_str(".end\n");
+
+    netlist
+}
+
+/// Run stand-alone noise analysis on a circuit with given source and load impedances
+pub fn evaluate_noise(
+    circuit: &Circuit,
+    r_source: f64,
+    r_load: f64,
+    stray_cap_pf: f64,
+    timeout: Duration,
+) -> Result<crate::spice::NoiseSummary, FitnessError> {
+    let netlist = to_noise_netlist(
+        circuit,
+        "Circuit Noise Evaluation",
+        r_source,
+        r_load,
+        10.0,
+        100_000.0,
+        stray_cap_pf,
+    );
+
+    let sim_res = run_simulation(&netlist, timeout)?;
+    if let Some(mut sum) = sim_res.noise_summary {
+        // Recalculate with exact r_source if needed
+        if let Some(ref pts) = sim_res.noise_response {
+            sum = crate::spice::parse_noise_summary(pts, "", Some(r_source));
+        }
+        Ok(sum)
+    } else if let Some(ref pts) = sim_res.noise_response {
+        Ok(crate::spice::parse_noise_summary(pts, "", Some(r_source)))
+    } else {
+        Err(FitnessError::MissingAcData)
+    }
+}
+
 /// Helper function to perform log-frequency linear interpolation across probe AC sweeps
 fn interpolate_probe<F>(probe_ac: &[crate::spice::ProbeAcPoint], target_freq: f64, extractor: F) -> f64
 where
@@ -412,8 +519,10 @@ pub fn evaluate_preset(
     let probe_netlist = to_probe_netlist(circuit, preset, stray_cap_pf);
     let sim_res = run_simulation(&probe_netlist, timeout)?;
 
+    let has_ac_probes = preset.probes.iter().any(|p| matches!(p.probe_type, ProbeType::Gain | ProbeType::Zin | ProbeType::Zout));
     let default_probe_ac = sim_res.probe_ac.as_deref().unwrap_or(&[]);
-    if default_probe_ac.is_empty()
+    if has_ac_probes
+        && default_probe_ac.is_empty()
         && sim_res
             .probe_ac_map
             .as_ref()
@@ -424,6 +533,7 @@ pub fn evaluate_preset(
     }
 
     let mut obj_vec = ObjectiveVector::new();
+    let mut noise_cache: HashMap<(u64, u64), crate::spice::NoiseSummary> = HashMap::new();
 
     for (target_idx, target) in preset.probes.iter().enumerate() {
         let target_probe_ac: &[crate::spice::ProbeAcPoint] = sim_res
@@ -439,6 +549,51 @@ pub fn evaluate_preset(
             ProbeType::Zout => interpolate_probe(target_probe_ac, target.condition.freq, |p| p.zout),
             ProbeType::DcOffset => v_out.abs(),
             ProbeType::Bom => circuit.components.len() as f64,
+            ProbeType::Noise => {
+                let r_src = if target.condition.r_source > 0.0 { target.condition.r_source } else { 600.0 };
+                let r_ld = if target.condition.r_load > 0.0 { target.condition.r_load } else { 10000.0 };
+                let key = (r_src.to_bits(), r_ld.to_bits());
+                let noise_sum = if let Some(n) = noise_cache.get(&key) {
+                    n.clone()
+                } else {
+                    let n = evaluate_noise(circuit, r_src, r_ld, stray_cap_pf, timeout)?;
+                    noise_cache.insert(key, n.clone());
+                    n
+                };
+                if (target.condition.freq - 100.0).abs() < 10.0 {
+                    noise_sum.inoise_spot_100
+                } else if (target.condition.freq - 10000.0).abs() < 100.0 {
+                    noise_sum.inoise_spot_10k
+                } else {
+                    noise_sum.inoise_spot_1k
+                }
+            }
+            ProbeType::NoiseFig => {
+                let r_src = if target.condition.r_source > 0.0 { target.condition.r_source } else { 600.0 };
+                let r_ld = if target.condition.r_load > 0.0 { target.condition.r_load } else { 10000.0 };
+                let key = (r_src.to_bits(), r_ld.to_bits());
+                let noise_sum = if let Some(n) = noise_cache.get(&key) {
+                    n.clone()
+                } else {
+                    let n = evaluate_noise(circuit, r_src, r_ld, stray_cap_pf, timeout)?;
+                    noise_cache.insert(key, n.clone());
+                    n
+                };
+                noise_sum.noise_figure_db.unwrap_or(50.0)
+            }
+            ProbeType::NoiseTotal => {
+                let r_src = if target.condition.r_source > 0.0 { target.condition.r_source } else { 600.0 };
+                let r_ld = if target.condition.r_load > 0.0 { target.condition.r_load } else { 10000.0 };
+                let key = (r_src.to_bits(), r_ld.to_bits());
+                let noise_sum = if let Some(n) = noise_cache.get(&key) {
+                    n.clone()
+                } else {
+                    let n = evaluate_noise(circuit, r_src, r_ld, stray_cap_pf, timeout)?;
+                    noise_cache.insert(key, n.clone());
+                    n
+                };
+                noise_sum.inoise_total_rms
+            }
         };
 
         let score = target.score(measured_val);
@@ -965,6 +1120,8 @@ pub struct ArchiveEntry {
     pub obj_summary: Option<String>,
     #[serde(default)]
     pub is_hardware_verified: bool,
+    #[serde(default)]
+    pub noise_summary: Option<crate::spice::NoiseSummary>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -1028,6 +1185,7 @@ impl NoveltyArchive {
         generation: usize,
         fitness: Option<f64>,
         obj_summary: Option<String>,
+        noise_summary: Option<crate::spice::NoiseSummary>,
     ) -> bool {
         if self.entries.is_empty() {
             self.entries.push(ArchiveEntry {
@@ -1038,6 +1196,7 @@ impl NoveltyArchive {
                 fitness,
                 obj_summary,
                 is_hardware_verified: false,
+                noise_summary,
             });
             return true;
         }
@@ -1056,6 +1215,7 @@ impl NoveltyArchive {
                 fitness,
                 obj_summary,
                 is_hardware_verified: false,
+                noise_summary,
             });
             true
         } else {
@@ -1075,7 +1235,7 @@ impl NoveltyArchive {
         min_dist: f64,
         mc_dev_db: Option<f64>,
     ) -> bool {
-        self.maybe_add_with_meta(circuit, descriptor, threshold, k, min_dist, mc_dev_db, 0, None, None)
+        self.maybe_add_with_meta(circuit, descriptor, threshold, k, min_dist, mc_dev_db, 0, None, None, None)
     }
 }
 
@@ -1575,6 +1735,7 @@ mod tests {
                 freq: 1000.0,
                 vin: 0.5,
                 r_load: 1000.0,
+                r_source: 600.0,
             },
             kind: ProbeKind::Closeness,
             want: 0.9,
@@ -1596,6 +1757,117 @@ mod tests {
         let obj_vec = evaluate_preset(circuit, &preset, 0.0, timeout).expect("Multi-condition evaluation must succeed");
         assert_eq!(obj_vec.names.len(), preset.probes.len());
         println!("Multi-condition evaluation results: {:?}", obj_vec.summary());
+    }
+
+    #[test]
+    fn test_pure_johnson_noise_evaluation() {
+        use crate::circuit::{Component, ComponentType, NODE_GND, NODE_IN, NODE_OUT};
+
+        // Passive pass-through circuit (a single 100 Ohm resistor between IN and OUT)
+        let mut circuit = Circuit::new();
+        circuit.add_component(Component {
+            id: 1,
+            comp_type: ComponentType::R,
+            nodes: vec![NODE_IN, NODE_OUT],
+            value: "100".to_string(),
+        });
+        // Pull-down 100k to ground
+        circuit.add_component(Component {
+            id: 2,
+            comp_type: ComponentType::R,
+            nodes: vec![NODE_OUT, NODE_GND],
+            value: "100k".to_string(),
+        });
+
+        let timeout = Duration::from_secs(5);
+        let noise_summary = evaluate_noise(&circuit, 600.0, 10000.0, 0.0, timeout)
+            .expect("Noise evaluation on passive network must succeed");
+
+        println!("Passive network noise summary: {:?}", noise_summary);
+        // Thermal Johnson noise floor of ~700 Ohm equivalent: sqrt(4 * k * T * 700) ≈ 3.4 nV/√Hz
+        assert!(
+            noise_summary.inoise_spot_1k >= 2.8 && noise_summary.inoise_spot_1k <= 4.0,
+            "Input-referred noise density at 1kHz should be ~3.4 nV/√Hz, got {:.3} nV/√Hz",
+            noise_summary.inoise_spot_1k
+        );
+
+        // For a passive resistor network, noise figure should be close to passive insertion loss (low dB)
+        if let Some(nf) = noise_summary.noise_figure_db {
+            println!("Measured Noise Figure: {:.2} dB", nf);
+            assert!(nf >= 0.0 && nf < 3.0, "Passive network NF should be low, got {:.2} dB", nf);
+        }
+    }
+
+    #[test]
+    fn test_bjt_noise_model_flicker_corner() {
+        use crate::circuit::{Component, ComponentType, NODE_GND, NODE_IN, NODE_OUT, NODE_VCC};
+
+        // Simple Common-Emitter BJT Amplifier
+        let mut circuit = Circuit::new();
+        // Base bias resistor from VCC: 470k
+        circuit.add_component(Component {
+            id: 1,
+            comp_type: ComponentType::R,
+            nodes: vec![NODE_VCC, 5],
+            value: "470k".to_string(),
+        });
+        // Base input coupling capacitor: 10uF from IN to Base (node 5)
+        circuit.add_component(Component {
+            id: 2,
+            comp_type: ComponentType::C,
+            nodes: vec![NODE_IN, 5],
+            value: "10u".to_string(),
+        });
+        // Collector load resistor: 4.7k from VCC to OUT (node 6)
+        circuit.add_component(Component {
+            id: 3,
+            comp_type: ComponentType::R,
+            nodes: vec![NODE_VCC, NODE_OUT],
+            value: "4.7k".to_string(),
+        });
+        // BJT 2N3904 (NPN): Collector=OUT, Base=5, Emitter=GND
+        circuit.add_component(Component {
+            id: 4,
+            comp_type: ComponentType::Q,
+            nodes: vec![NODE_OUT, 5, NODE_GND],
+            value: "2N3904".to_string(),
+        });
+
+        let timeout = Duration::from_secs(5);
+        let noise_summary = evaluate_noise(&circuit, 600.0, 10000.0, 0.0, timeout)
+            .expect("Noise evaluation on BJT amplifier must succeed");
+
+        println!("BJT CE amplifier noise summary: {:?}", noise_summary);
+        println!("  • 100 Hz spot noise: {:.2} nV/√Hz", noise_summary.inoise_spot_100);
+        println!("  • 1 kHz spot noise:  {:.2} nV/√Hz", noise_summary.inoise_spot_1k);
+        println!("  • 10 kHz spot noise: {:.2} nV/√Hz", noise_summary.inoise_spot_10k);
+        println!("  • Total RMS noise:   {:.2} µV RMS", noise_summary.inoise_total_rms);
+        if let Some(fc) = noise_summary.corner_freq {
+            println!("  • 1/f Corner Freq:   {:.1} Hz", fc);
+        }
+
+        // Verify that 1/f flicker noise causes 100Hz noise to be higher than 10kHz thermal floor
+        assert!(
+            noise_summary.inoise_spot_100 > noise_summary.inoise_spot_10k,
+            "100 Hz noise ({:.2} nV) should be greater than 10 kHz noise ({:.2} nV) due to BJT flicker noise (Kf)",
+            noise_summary.inoise_spot_100,
+            noise_summary.inoise_spot_10k
+        );
+    }
+
+    #[test]
+    fn test_low_noise_preamp_preset_evaluation() {
+        let seeds = crate::mutate::seed_discrete_population(1);
+        let circuit = &seeds[0];
+
+        let preset = Preset::low_noise_preamp_default();
+        let timeout = Duration::from_secs(5);
+        let obj_vec = evaluate_preset(circuit, &preset, 0.0, timeout)
+            .expect("Low-noise preamp preset evaluation must succeed");
+
+        println!("Low-noise preamp preset evaluation results: {:?}", obj_vec.summary());
+        assert_eq!(obj_vec.names.len(), preset.probes.len());
+        assert!(obj_vec.names.iter().any(|n| n.contains("Noise")));
     }
 }
 

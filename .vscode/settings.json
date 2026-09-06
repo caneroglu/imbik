@@ -1,0 +1,6 @@
+{
+    "sonarlint.connectedMode.project": {
+        "connectionId": "caneroglu",
+        "projectKey": "caneroglu_imbik"
+    }
+}
