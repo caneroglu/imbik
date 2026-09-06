@@ -212,16 +212,18 @@ pub fn mutate_add_component(circuit: &mut Circuit) -> bool {
             }
         }
     } else if roll < 75 {
-        // Add Diode (10%)
-        if let Some((u, v)) = pick_two_nodes(&nodes) {
-            let id = next_id(circuit, ComponentType::D);
-            if let Ok(comp) = Component::new('D', id, vec![u, v], "1N4148") {
-                circuit.add_component(comp);
-                return true;
+        // Add Diode (10% in discrete, 5% if opamp)
+        if !has_opamp || fastrand::bool() {
+            if let Some((u, v)) = pick_two_nodes(&nodes) {
+                let id = next_id(circuit, ComponentType::D);
+                if let Ok(comp) = Component::new('D', id, vec![u, v], "1N4148") {
+                    circuit.add_component(comp);
+                    return true;
+                }
             }
         }
-    } else if roll < 95 || !has_opamp {
-        // Add BJT Transistor (20% or 25% in discrete circuits)
+    } else if !has_opamp {
+        // Add BJT Transistor (discrete circuits only)
         let bjt_count = circuit.components.iter().filter(|c| c.comp_type == ComponentType::Q).count();
         if bjt_count < 4 {
             let is_npn = fastrand::bool();
@@ -256,14 +258,14 @@ pub fn mutate_add_component(circuit: &mut Circuit) -> bool {
             }
         }
     } else {
-        // Add Op-Amp TL072 (if circuit has <= 3 opamps)
+        // Add Op-Amp TL072 (only if no opamp exists or max 1)
         let opamp_count = circuit
             .components
             .iter()
             .filter(|c| c.comp_type == ComponentType::X)
             .count();
 
-        if opamp_count < 3 {
+        if opamp_count < 1 || (opamp_count < 2 && fastrand::u8(0..100) < 5) {
             let non_inv = nodes[fastrand::usize(0..nodes.len())];
             let out_node = next_node_id(circuit);
             let inv_node = next_node_id(circuit);
@@ -443,32 +445,42 @@ pub fn mutate_add_feedback(circuit: &mut Circuit) -> bool {
     if !opamp_indices.is_empty() {
         let op_idx = opamp_indices[fastrand::usize(0..opamp_indices.len())];
         let out_node = circuit.components[op_idx].nodes[4];
+        let inv_node = circuit.components[op_idx].nodes[1];
 
-        let mut candidate_pins = Vec::new();
-        if circuit.components[op_idx].nodes[0] != out_node {
-            candidate_pins.push(circuit.components[op_idx].nodes[0]);
-        }
-        if circuit.components[op_idx].nodes[1] != out_node {
-            candidate_pins.push(circuit.components[op_idx].nodes[1]);
-        }
-
-        if !candidate_pins.is_empty() {
-            let in_node = candidate_pins[fastrand::usize(0..candidate_pins.len())];
-
+        // 1. If inverting input is not yet directly shorted to output, connect negative feedback (R or C)
+        if inv_node != out_node {
             if fastrand::bool() {
                 let id = next_id(circuit, ComponentType::R);
                 let val = E24_VALUES[fastrand::usize(0..E24_VALUES.len())];
-                if let Ok(comp) = Component::new('R', id, vec![out_node, in_node], val) {
+                if let Ok(comp) = Component::new('R', id, vec![out_node, inv_node], val) {
                     circuit.add_component(comp);
                     return true;
                 }
             } else {
                 let id = next_id(circuit, ComponentType::C);
                 let val = E12_VALUES[fastrand::usize(0..E12_VALUES.len())];
-                if let Ok(comp) = Component::new('C', id, vec![out_node, in_node], val) {
+                if let Ok(comp) = Component::new('C', id, vec![out_node, inv_node], val) {
                     circuit.add_component(comp);
                     return true;
                 }
+            }
+        }
+
+        // 2. Active filter feedback: connect feedback capacitor from OUT to an intermediate tie-point node
+        let internal_nodes: Vec<usize> = circuit
+            .nodes
+            .iter()
+            .copied()
+            .filter(|&n| n != out_node && n != NODE_VCC && n != NODE_VEE && n != NODE_GND)
+            .collect();
+
+        if !internal_nodes.is_empty() {
+            let target_node = internal_nodes[fastrand::usize(0..internal_nodes.len())];
+            let id = next_id(circuit, ComponentType::C);
+            let val = E12_VALUES[fastrand::usize(0..E12_VALUES.len())];
+            if let Ok(comp) = Component::new('C', id, vec![out_node, target_node], val) {
+                circuit.add_component(comp);
+                return true;
             }
         }
     }
@@ -723,20 +735,22 @@ pub fn mutate_with_stats(circuit: &Circuit, stats: &mut MutationStats) -> Circui
                 _ => 1,     // add (10%)
             }
         } else if comp_count <= 4 {
-            match fastrand::u8(0..10) {
-                0..=3 => 1, // add component (40%)
-                4..=6 => 0, // change value (30%)
-                7..=8 => 4, // add feedback (20%)
-                _ => 7,     // add bootstrap (10%)
+            match fastrand::u8(0..100) {
+                0..=24 => 0,  // change value (25%)
+                25..=49 => 1, // add component (25%)
+                50..=69 => 6, // split resistor (20%) - crucial for intermediate ladder nodes!
+                70..=84 => 3, // move terminal (15%)
+                85..=94 => 4, // add feedback (10%)
+                _ => 7,       // add bootstrap (5%)
             }
         } else {
             match fastrand::u8(0..100) {
                 0..=25 => 0,  // change value (25%)
-                26..=50 => 1, // add component (25%)
-                51..=65 => 2, // remove component (15%)
-                66..=75 => 3, // move terminal (10%)
-                76..=85 => 4, // add feedback (10%)
-                86..=92 => 6, // split resistor (7%)
+                26..=45 => 1, // add component (20%)
+                46..=60 => 2, // remove component (15%)
+                61..=70 => 3, // move terminal (10%)
+                71..=80 => 4, // add feedback (10%)
+                81..=92 => 6, // split resistor (12%)
                 93..=97 => 7, // add bootstrap (5%)
                 _ => 5,       // cross coupling (3%)
             }

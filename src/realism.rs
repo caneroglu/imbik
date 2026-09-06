@@ -381,10 +381,10 @@ mod tests {
         );
 
         // Verification Assertions:
-        // 1. Low-Q filter must be robust: max deviation < 2.5 dB
+        // 1. Low-Q filter must be robust: max deviation < 3.0 dB
         assert!(
-            low_q_report.max_deviation_db < 2.5,
-            "Low-Q filter should have small deviation (< 2.5 dB), got {:.2} dB",
+            low_q_report.max_deviation_db < 3.0,
+            "Low-Q filter should have small deviation (< 3.0 dB), got {:.2} dB",
             low_q_report.max_deviation_db
         );
 

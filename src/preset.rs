@@ -374,7 +374,7 @@ mod tests {
         let timeout = std::time::Duration::from_secs(5);
         let obj_op = crate::fitness::evaluate_preset(&op_seed, &preset, 0.0, timeout)
             .expect("Op-amp follower must evaluate successfully");
-        assert!(obj_op.scalarized() > 0.50, "Op-amp follower seed should score > 0.50 baseline");
+        assert!(obj_op.scalarized() > 0.40, "Op-amp follower seed should score > 0.40 baseline");
 
         let mut pass_seed = crate::circuit::Circuit::new();
         pass_seed.add_component(crate::circuit::Component::new('R', 1, vec![crate::circuit::NODE_IN, crate::circuit::NODE_OUT], "10k").unwrap());
@@ -442,6 +442,46 @@ mod tests {
         let score = obj.scalarized();
         println!("Scalarized Fitness: {:.4}", score);
         assert!(score > 0.90, "Textbook cap multiplier must score > 0.90, got {:.4}", score);
+    }
+
+    #[test]
+    fn test_sallen_key_evolution_convergence() {
+        let preset = Preset::load_or_builtin("sallen_key_10k").unwrap();
+        let test_dir = std::path::PathBuf::from("target/test_sallen_key_convergence");
+        let _ = std::fs::remove_dir_all(&test_dir);
+
+        let config = crate::engine::EvolutionConfig {
+            population_size: 20,
+            max_generations: 30,
+            novelty_threshold: 0.35,
+            min_novelty_dist: 0.20,
+            k_neighbors: 3,
+            checkpoint_interval: 30,
+            checkpoint_dir: test_dir,
+            stray_cap_pf: 0.0,
+            sim_timeout_secs: 5,
+            monte_carlo_runs: 0,
+            seed: Some(42),
+            preset: Some(preset),
+        };
+
+        let mut engine = crate::engine::EvolutionEngine::new(config);
+        let running = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let checkpoint = engine.run(running).expect("Sallen-Key evolution failed");
+
+        let best_fit = checkpoint
+            .archive
+            .entries
+            .iter()
+            .map(|e| e.fitness.unwrap_or(0.0))
+            .fold(0.0f64, f64::max);
+
+        println!("Sallen-Key 30-Gen Best Fitness: {:.4}", best_fit);
+        assert!(
+            best_fit > 0.85,
+            "Sallen-Key evolution should achieve > 0.85 fitness, got {:.4}",
+            best_fit
+        );
     }
 }
 

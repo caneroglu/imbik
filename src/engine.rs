@@ -116,7 +116,7 @@ impl EvolutionEngine {
                 return;
             }
 
-            // Op-Amp Preset Mission Seeding: Op-Amp follower seed + buffered follower with input resistor
+            // Op-Amp Preset Mission Seeding: Op-Amp follower seed + buffered follower with input resistor + 2-stage ladder follower
             let mut op_seed = Circuit::new();
             op_seed.add_component(
                 Component::new('X', 1, vec![NODE_IN, NODE_OUT, NODE_VCC, NODE_VEE, NODE_OUT], "TL072").unwrap(),
@@ -130,15 +130,21 @@ impl EvolutionEngine {
             );
             let _ = op_res_seed.validate();
 
+            let mut op_res2_seed = Circuit::new();
+            op_res2_seed.add_component(Component::new('R', 1, vec![NODE_IN, 10], "10k").unwrap());
+            op_res2_seed.add_component(Component::new('R', 2, vec![10, 20], "10k").unwrap());
+            op_res2_seed.add_component(
+                Component::new('X', 1, vec![20, NODE_OUT, NODE_VCC, NODE_VEE, NODE_OUT], "TL072").unwrap(),
+            );
+            let _ = op_res2_seed.validate();
+
             self.population.push(op_seed.clone());
             self.population.push(op_res_seed.clone());
+            self.population.push(op_res2_seed.clone());
 
+            let seeds = [&op_seed, &op_res_seed, &op_res2_seed];
             while self.population.len() < self.config.population_size {
-                let base = if self.population.len() % 2 == 0 {
-                    &op_seed
-                } else {
-                    &op_res_seed
-                };
+                let base = seeds[self.population.len() % seeds.len()];
                 self.population.push(mutate(base));
             }
             return;
@@ -204,6 +210,13 @@ impl EvolutionEngine {
                 "Starting İmbik Preset Mission: '{}' [Checksum: {}] | Seed: 0x{:016x} | Pop: {}, Max Gens: {}, Discrete: {}",
                 preset.name, preset_hash, seed, self.config.population_size, self.config.max_generations, !preset.allow_opamps
             );
+            log::info!(
+                "Preset mission '{}' started (seed: 0x{:016x}, pop: {}, gens: {})",
+                preset.name,
+                seed,
+                self.config.population_size,
+                self.config.max_generations
+            );
             println!("Target Probes:");
             for p in &preset.probes {
                 println!(
@@ -212,497 +225,36 @@ impl EvolutionEngine {
                 );
             }
             println!();
-
-            for gen_idx in 1..=self.config.max_generations {
-                if !running_flag.load(Ordering::SeqCst) {
-                    println!("\nGraceful shutdown signal received at generation {}. Saving checkpoint...", gen_idx);
-                    break;
-                }
-
-                let gen_start = Instant::now();
-
-                // 1. Create pool of parents + mutant offspring (Elitist selection)
-                let mut pool = self.population.clone();
-                pool.extend(self.population.iter().map(|parent| mutate(parent)));
-
-                let stray_pf = self.config.stray_cap_pf;
-                let preset_clone = preset.clone();
-                let total_eval = pool.len();
-
-                // 2. Parallel Evaluation with Feasibility Gate & Pluggable Probes
-                let eval_results: Vec<CandidateResult> = pool
-                    .into_par_iter()
-                    .map(|circuit| {
-                        if let Err(e) = circuit.validate() {
-                            return CandidateResult {
-                                circuit,
-                                descriptor: None,
-                                objectives: None,
-                                fitness_score: 0.0,
-                                reject_reason: Some(format!("Validate: {:?}", e)),
-                            };
-                        }
-
-                        match evaluate_preset(&circuit, &preset_clone, stray_pf, timeout) {
-                            Ok(obj) => {
-                                let sc = obj.scalarized();
-                                CandidateResult {
-                                    circuit,
-                                    descriptor: None,
-                                    objectives: Some(obj),
-                                    fitness_score: sc,
-                                    reject_reason: None,
-                                }
-                            }
-                            Err(e) => CandidateResult {
-                                circuit,
-                                descriptor: None,
-                                objectives: None,
-                                fitness_score: 0.0,
-                                reject_reason: Some(format!("{}", e)),
-                            },
-                        }
-                    })
-                    .collect();
-
-                let val_rejected = eval_results
-                    .iter()
-                    .filter(|r| r.reject_reason.as_ref().map(|s| s.starts_with("Validate")).unwrap_or(false))
-                    .count();
-
-                let gate_rejected = eval_results
-                    .iter()
-                    .filter(|r| r.reject_reason.as_ref().map(|s| !s.starts_with("Validate")).unwrap_or(false))
-                    .count();
-
-                let mut scored: Vec<CandidateResult> = eval_results
-                    .into_iter()
-                    .filter(|r| r.objectives.is_some())
-                    .collect();
-
-                let scored_count = scored.len();
-
-                // Tie-breaking: Fitness (desc) -> BOM Count (asc: Occam's Razor!) -> DC Offset (asc)
-                scored.sort_by(|a, b| {
-                    let f_ord = b.fitness_score.partial_cmp(&a.fitness_score).unwrap_or(std::cmp::Ordering::Equal);
-                    if f_ord != std::cmp::Ordering::Equal {
-                        return f_ord;
-                    }
-                    let comp_ord = a.circuit.components.len().cmp(&b.circuit.components.len());
-                    if comp_ord != std::cmp::Ordering::Equal {
-                        return comp_ord;
-                    }
-                    let dc_a = a.objectives.as_ref().and_then(|o| o.values.get(2)).copied().unwrap_or(0.0);
-                    let dc_b = b.objectives.as_ref().and_then(|o| o.values.get(2)).copied().unwrap_or(0.0);
-                    dc_a.abs().partial_cmp(&dc_b.abs()).unwrap_or(std::cmp::Ordering::Equal)
-                });
-
-                // Diversity Selection: Filter duplicates to prevent clone stagnation
-                let mut next_pop = Vec::new();
-                let mut seen_topologies = std::collections::HashSet::new();
-
-                for r in &scored {
-                    if next_pop.len() < self.config.population_size {
-                        let topo_sig = r.circuit.to_netlist("SIG");
-                        if seen_topologies.insert(topo_sig) {
-                            next_pop.push(r.circuit.clone());
-                        }
-                    }
-                }
-
-                let unique_topologies = seen_topologies.len();
-                let duration_ms = gen_start.elapsed().as_millis();
-
-                if let Some(best) = scored.first() {
-                    let best_obj_summary = best.objectives.as_ref().map(|o| o.summary()).unwrap_or_default();
-                    println!(
-                        "[Gen {:>2}] Eval: {:>2} | Rej: {:>2} (Gate: {:>2}, Val: {:>2}) | Scored: {:>2} | Uniq: {:>2} | Best: {:.6} | Time: {}ms | {}",
-                        gen_idx, total_eval, gate_rejected + val_rejected, gate_rejected, val_rejected, scored_count, unique_topologies, best.fitness_score, duration_ms, best_obj_summary
-                    );
-
-                    // Archive candidates:
-                    // 1. Champion is always considered first
-                    // 2. Additional slots select diverse high-performing candidates maximizing novelty
-                    let mut archived_in_gen = 0;
-                    let mut archive_candidates: Vec<&CandidateResult> = Vec::new();
-                    archive_candidates.push(best);
-
-                    // Identify high-performing candidates (>= 50% of champion fitness) with unique topologies
-                    let mut seen_archive_topos = std::collections::HashSet::new();
-                    seen_archive_topos.insert(best.circuit.to_netlist("SIG"));
-
-                    let min_viable_fitness = (best.fitness_score * 0.5).max(0.2);
-                    let mut diverse_pool = Vec::new();
-
-                    for cand in scored.iter().skip(1) {
-                        if cand.fitness_score < min_viable_fitness {
-                            break;
-                        }
-                        let sig = cand.circuit.to_netlist("SIG");
-                        if seen_archive_topos.insert(sig) {
-                            diverse_pool.push(cand);
-                            if diverse_pool.len() >= 6 {
-                                break;
-                            }
-                        }
-                    }
-
-                    // Score diverse pool by novelty distance to current archive
-                    let mut novelty_scored: Vec<(&CandidateResult, f64)> = Vec::new();
-                    for cand in diverse_pool {
-                        if let Ok(desc) = extract_behavior_descriptor(&cand.circuit, stray_pf, timeout) {
-                            let nn_dist = self.archive.min_distance(&desc);
-                            novelty_scored.push((cand, nn_dist));
-                        }
-                    }
-
-                    // Sort by novelty distance descending (most novel first)
-                    novelty_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-                    for (cand, _) in novelty_scored.into_iter().take(2) {
-                        archive_candidates.push(cand);
-                    }
-
-                    for cand in archive_candidates {
-                        if cand.fitness_score <= 0.0 || archived_in_gen >= 3 {
-                            break;
-                        }
-                        let cand_summary = cand.objectives.as_ref().map(|o| o.summary()).unwrap_or_default();
-                        match extract_behavior_descriptor(&cand.circuit, stray_pf, timeout) {
-                            Ok(desc) => {
-                                let nn_dist = self.archive.min_distance(&desc);
-                                let best_archived_fit = self.archive.entries.iter().filter_map(|e| e.fitness).fold(0.0, f64::max);
-                                let is_breakthrough = cand.fitness_score > best_archived_fit;
-                                let is_duplicate = !self.archive.is_empty()
-                                    && nn_dist < self.config.min_novelty_dist
-                                    && !is_breakthrough;
-
-                                if !is_duplicate {
-                                    let mc_dev_db = evaluate_monte_carlo(
-                                        &cand.circuit,
-                                        self.config.monte_carlo_runs,
-                                        0.05,
-                                        stray_pf,
-                                        timeout,
-                                    )
-                                    .ok()
-                                    .map(|rep| rep.max_deviation_db);
-
-                                    let effective_min_dist = if is_breakthrough { 0.0 } else { self.config.min_novelty_dist };
-                                    let added = self.archive.maybe_add_with_meta(
-                                        cand.circuit.clone(),
-                                        desc,
-                                        // Mission mode ranks by spec fitness, not novelty, so no
-                                        // k-NN threshold - but still refuse behavioural clones.
-                                        0.0,
-                                        self.config.k_neighbors,
-                                        effective_min_dist,
-                                        mc_dev_db,
-                                        gen_idx,
-                                        Some(cand.fitness_score),
-                                        Some(cand_summary),
-                                    );
-
-                                    if added {
-                                        archived_in_gen += 1;
-                                        let nn_report =
-                                            if nn_dist.is_finite() { nn_dist } else { 1.0 };
-                                        let rarity = evaluate_rarity(nn_report, mc_dev_db, &desc);
-                                        let mc_str = mc_dev_db
-                                            .map(|v| format!("{:.1}dB", v))
-                                            .unwrap_or_else(|| "--".to_string());
-                                        println!(
-                                            "  {} DROP  #{} | fit={:.4} | nn={:.3} mc={} | {}",
-                                            rarity.colored_label(),
-                                            self.archive.len() - 1,
-                                            cand.fitness_score,
-                                            nn_report,
-                                            mc_str,
-                                            describe_character(&desc)
-                                        );
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                if archived_in_gen == 0 && std::ptr::eq(cand, best) {
-                                    eprintln!(
-                                        "  [Gen {}] Champion characterization failed, not archived: {}",
-                                        gen_idx, e
-                                    );
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    println!(
-                        "[Gen {:>2}] Eval: {:>2} | Rej: {:>2} (Gate: {:>2}, Val: {:>2}) | Scored:  0 | Feasibility Gate dropped all candidates | Time: {}ms",
-                        gen_idx, total_eval, gate_rejected + val_rejected, gate_rejected, val_rejected, duration_ms
-                    );
-                }
-
-                // Fill remaining population slots with fresh mutations of surviving parents (diversity injection)
-                let mut fill_idx = 0;
-                while next_pop.len() < self.config.population_size {
-                    if !next_pop.is_empty() {
-                        let parent = &next_pop[fill_idx % next_pop.len()];
-                        next_pop.push(mutate(parent));
-                        fill_idx += 1;
-                    } else if !self.population.is_empty() {
-                        let parent = &self.population[fill_idx % self.population.len()];
-                        next_pop.push(mutate(parent));
-                        fill_idx += 1;
-                    } else {
-                        let fresh = crate::mutate::seed_discrete_population(1);
-                        next_pop.push(fresh[0].clone());
-                    }
-                }
-
-                self.population = next_pop;
-            }
-
-            let final_path = self.config.checkpoint_dir.join("checkpoint_final.json");
-            let stats = GenerationStats {
-                generation: self.config.max_generations,
-                valid_topologies: self.config.population_size,
-                constraint_passed: self.population.len(),
-                archive_size: self.archive.len(),
-                max_novelty: 1.0,
-                avg_novelty: 1.0,
-                duration_ms: 0,
-            };
-            let checkpoint = self.save_checkpoint(&final_path, &stats)?;
-            return Ok(checkpoint);
+        } else {
+            println!(
+                "Starting İmbik Evolution Loop: Population = {}, Max Generations = {}, Novelty Threshold = {:.2} | Seed: 0x{:016x}",
+                self.config.population_size, self.config.max_generations, self.config.novelty_threshold, seed
+            );
+            log::info!(
+                "Novelty search started (seed: 0x{:016x}, pop: {}, gens: {}, threshold: {:.2})",
+                seed,
+                self.config.population_size,
+                self.config.max_generations,
+                self.config.novelty_threshold
+            );
         }
-
-        println!(
-            "Starting İmbik Evolution Loop: Population = {}, Max Generations = {}, Novelty Threshold = {:.2}",
-            self.config.population_size, self.config.max_generations, self.config.novelty_threshold
-        );
 
         for gen_idx in 1..=self.config.max_generations {
             if !running_flag.load(Ordering::SeqCst) {
                 println!("\nGraceful shutdown signal received at generation {}. Saving checkpoint...", gen_idx);
+                log::info!("Graceful shutdown signal received at generation {}", gen_idx);
                 break;
             }
 
-            let gen_start = Instant::now();
-
-            // 1. Create mutant offspring from previous population
-            let offspring: Vec<Circuit> = self
-                .population
-                .iter()
-                .map(|parent| mutate(parent))
-                .collect();
-
-            // 2. Parallel Evaluation via Rayon across all CPU cores
-            let stray_pf = self.config.stray_cap_pf;
-            let eval_results: Vec<CandidateResult> = offspring
-                .into_par_iter()
-                .map(|circuit| {
-                    // Fast graph topology validation (0ms)
-                    if let Err(e) = circuit.validate() {
-                        return CandidateResult {
-                            circuit,
-                            descriptor: None,
-                            objectives: None,
-                            fitness_score: 0.0,
-                            reject_reason: Some(format!("Validate: {:?}", e)),
-                        };
-                    }
-
-                    // Single-pass characterization simulation
-                    let netlist = to_characterization_netlist(&circuit, "Gen Eval", stray_pf);
-                    let sim_res = match run_simulation(&netlist, timeout) {
-                        Ok(res) => res,
-                        Err(e) => {
-                            return CandidateResult {
-                                circuit,
-                                descriptor: None,
-                                objectives: None,
-                                fitness_score: 0.0,
-                                reject_reason: Some(format!("SPICE: {}", e)),
-                            };
-                        }
-                    };
-
-                    // S3 Constraint check (fail fast on rails, dead signal, DC offset, phase jump)
-                    if let Err(reject) = check(&sim_res, circuit.vcc, circuit.vee) {
-                        return CandidateResult {
-                            circuit,
-                            descriptor: None,
-                            objectives: None,
-                            fitness_score: 0.0,
-                            reject_reason: Some(format!("Constraint: {:?}", reject)),
-                        };
-                    }
-
-                    let ac_data = match sim_res.ac_response {
-                        Some(d) => d,
-                        None => {
-                            return CandidateResult {
-                                circuit,
-                                descriptor: None,
-                                objectives: None,
-                                fitness_score: 0.0,
-                                reject_reason: Some("Missing AC".to_string()),
-                            };
-                        }
-                    };
-                    let tran_s = match sim_res.tran_small {
-                        Some(d) => d,
-                        None => {
-                            return CandidateResult {
-                                circuit,
-                                descriptor: None,
-                                objectives: None,
-                                fitness_score: 0.0,
-                                reject_reason: Some("Missing TranSmall".to_string()),
-                            };
-                        }
-                    };
-                    let tran_l = match sim_res.tran_large {
-                        Some(d) => d,
-                        None => {
-                            return CandidateResult {
-                                circuit,
-                                descriptor: None,
-                                objectives: None,
-                                fitness_score: 0.0,
-                                reject_reason: Some("Missing TranLarge".to_string()),
-                            };
-                        }
-                    };
-                    let tran_z = sim_res.tran_zero.unwrap_or_default();
-
-                    let (has_filt, ac_c, ac_s, ac_q) = extract_ac_features(&ac_data);
-                    let (asym, h2, h3, h5, comp) = extract_nonlinear_features(&tran_s, &tran_l);
-                    let (osc_r, osc_f) = extract_oscillation_features(&tran_z);
-
-                    let desc: BehaviorDescriptor =
-                        [has_filt, ac_c, ac_s, ac_q, asym, h2, h3, h5, comp, osc_r, osc_f];
-
-                    CandidateResult {
-                        circuit,
-                        descriptor: Some(desc),
-                        objectives: None,
-                        fitness_score: 0.0,
-                        reject_reason: None,
-                    }
-                })
-                .collect();
-
-            // 3. Sequential Novelty Evaluation and Archive Updates
-            let mut passed_candidates = Vec::new();
-            let mut novelty_scores = Vec::new();
-
-            for res in eval_results {
-                if let Some(desc) = res.descriptor {
-                    let score = self.archive.novelty_score(&desc, self.config.k_neighbors);
-                    novelty_scores.push(score);
-
-                    let nearest_dist = self.archive.min_distance(&desc);
-
-                    // Candidate qualifies for the Novelty Archive if:
-                    // 1. Distance to nearest neighbor >= min_novelty_dist (prevents near-duplicate pollution)
-                    // 2. Average k-NN score >= novelty_threshold (or initial seed fill)
-                    if (score >= self.config.novelty_threshold && nearest_dist >= self.config.min_novelty_dist)
-                        || self.archive.len() < self.config.k_neighbors
-                    {
-                        // Monte Carlo Robustness Gate: Run runs ONLY for novel discoveries
-                        let mc_report = evaluate_monte_carlo(
-                            &res.circuit,
-                            self.config.monte_carlo_runs,
-                            0.05,
-                            stray_pf,
-                            timeout,
-                        );
-
-                        let dev_db = match &mc_report {
-                            Ok(rep) => {
-                                println!(
-                                    "  [Gen {} Novelty Discovery] Score: {:.4}, Dev: {:.2}dB, Runs: {}/{}",
-                                    gen_idx, score, rep.max_deviation_db, rep.runs_passed, rep.total_runs
-                                );
-                                Some(rep.max_deviation_db)
-                            }
-                            Err(_) => None,
-                        };
-
-                        self.archive.maybe_add(
-                            res.circuit.clone(),
-                            desc,
-                            self.config.novelty_threshold,
-                            self.config.k_neighbors,
-                            self.config.min_novelty_dist,
-                            dev_db,
-                        );
-                    }
-
-                    passed_candidates.push((res.circuit, score));
-                }
-            }
-
-            // 4. Survival Selection: Keep the highest-novelty candidates
-            passed_candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-            let mut next_pop = Vec::new();
-            for (c, _) in passed_candidates {
-                if next_pop.len() < self.config.population_size {
-                    next_pop.push(c);
-                }
-            }
-
-            // Fill any vacancies with mutants from current population or archive
-            let mut fill_idx = 0;
-            while next_pop.len() < self.config.population_size {
-                if !self.archive.entries.is_empty() {
-                    let seed = &self.archive.entries[fill_idx % self.archive.entries.len()].circuit;
-                    next_pop.push(mutate(seed));
-                } else if !self.population.is_empty() {
-                    let seed = &self.population[fill_idx % self.population.len()];
-                    next_pop.push(mutate(seed));
-                } else {
-                    break;
-                }
-                fill_idx += 1;
-            }
-
-            self.population = next_pop;
-
-            let max_nov = novelty_scores
-                .iter()
-                .cloned()
-                .fold(0.0, f64::max);
-            let avg_nov = if !novelty_scores.is_empty() {
-                novelty_scores.iter().sum::<f64>() / (novelty_scores.len() as f64)
+            let stats = if let Some(ref preset) = self.config.preset.clone() {
+                self.step_preset_generation(gen_idx, preset, timeout)
             } else {
-                0.0
+                self.step_novelty_generation(gen_idx, timeout)
             };
-
-            let stats = GenerationStats {
-                generation: gen_idx,
-                valid_topologies: self.config.population_size,
-                constraint_passed: novelty_scores.len(),
-                archive_size: self.archive.len(),
-                max_novelty: max_nov,
-                avg_novelty: avg_nov,
-                duration_ms: gen_start.elapsed().as_millis(),
-            };
-
-            println!(
-                "Gen {:>3} | Passed: {:>2}/{} | Archive: {:>3} | Max Nov: {:.4} | Avg Nov: {:.4} | Time: {}ms",
-                gen_idx,
-                stats.constraint_passed,
-                self.config.population_size,
-                stats.archive_size,
-                stats.max_novelty,
-                stats.avg_novelty,
-                stats.duration_ms
-            );
 
             self.stats_history.push(stats.clone());
 
-            // 5. Periodic Checkpoint Serialization
+            // Periodic Checkpoint Serialization
             if gen_idx % self.config.checkpoint_interval == 0 || gen_idx == self.config.max_generations {
                 let checkpoint_file = self
                     .config
@@ -718,6 +270,543 @@ impl EvolutionEngine {
         let checkpoint = self.save_checkpoint(&final_path, &last_stats)?;
 
         Ok(checkpoint)
+    }
+
+    /// Single generation step in Preset Mission Mode
+    fn step_preset_generation(
+        &mut self,
+        gen_idx: usize,
+        preset: &Preset,
+        timeout: Duration,
+    ) -> GenerationStats {
+        let gen_start = Instant::now();
+
+        // 1. Create pool of parents + mutant offspring (Elitist selection)
+        let mut pool = self.population.clone();
+        pool.extend(self.population.iter().map(|parent| mutate(parent)));
+
+        let stray_pf = self.config.stray_cap_pf;
+        let preset_clone = preset.clone();
+        let total_eval = pool.len();
+
+        // 2. Parallel Evaluation with Feasibility Gate & Pluggable Probes
+        let eval_results: Vec<CandidateResult> = pool
+            .into_par_iter()
+            .map(|circuit| {
+                if let Err(e) = circuit.validate() {
+                    return CandidateResult {
+                        circuit,
+                        descriptor: None,
+                        objectives: None,
+                        fitness_score: 0.0,
+                        reject_reason: Some(format!("Validate: {:?}", e)),
+                    };
+                }
+
+                match evaluate_preset(&circuit, &preset_clone, stray_pf, timeout) {
+                    Ok(obj) => {
+                        let sc = obj.scalarized();
+                        CandidateResult {
+                            circuit,
+                            descriptor: None,
+                            objectives: Some(obj),
+                            fitness_score: sc,
+                            reject_reason: None,
+                        }
+                    }
+                    Err(e) => CandidateResult {
+                        circuit,
+                        descriptor: None,
+                        objectives: None,
+                        fitness_score: 0.0,
+                        reject_reason: Some(format!("{}", e)),
+                    },
+                }
+            })
+            .collect();
+
+        let val_rejected = eval_results
+            .iter()
+            .filter(|r| r.reject_reason.as_ref().map(|s| s.starts_with("Validate")).unwrap_or(false))
+            .count();
+
+        let gate_rejected = eval_results
+            .iter()
+            .filter(|r| r.reject_reason.as_ref().map(|s| !s.starts_with("Validate")).unwrap_or(false))
+            .count();
+
+        let mut scored: Vec<CandidateResult> = eval_results
+            .into_iter()
+            .filter(|r| r.objectives.is_some())
+            .collect();
+
+        let scored_count = scored.len();
+
+        // Occam's Razor Lexicographic Sort (Silva & Almeida / Luke & Panait epsilon-lexicographic parsimony):
+        // 1. Fitness Bucket: Discretized with resolution OCCAM_EPSILON (0.5% = 0.005)
+        // 2. Component Count (BOM): Within the same performance bucket, simpler circuits win!
+        // 3. Fine Fitness: If same BOM, fine continuous score decides
+        // 4. DC Offset: Minimize DC offset
+        const OCCAM_EPSILON: f64 = 0.005; // 0.5% physical indifference margin
+
+        let to_bucket = |f: f64| -> i64 {
+            if f.is_nan() || f.is_infinite() {
+                -1
+            } else {
+                (f / OCCAM_EPSILON).floor() as i64
+            }
+        };
+
+        scored.sort_by(|a, b| {
+            let bucket_a = to_bucket(a.fitness_score);
+            let bucket_b = to_bucket(b.fitness_score);
+            let bucket_ord = bucket_b.cmp(&bucket_a); // Descending: higher fitness bucket first
+            if bucket_ord != std::cmp::Ordering::Equal {
+                return bucket_ord;
+            }
+
+            // Within same performance bucket: Occam's Razor (fewer components wins!)
+            let comp_ord = a.circuit.components.len().cmp(&b.circuit.components.len());
+            if comp_ord != std::cmp::Ordering::Equal {
+                return comp_ord;
+            }
+
+            // Same component count: fallback to fine continuous fitness
+            let f_ord = b.fitness_score.partial_cmp(&a.fitness_score).unwrap_or(std::cmp::Ordering::Equal);
+            if f_ord != std::cmp::Ordering::Equal {
+                return f_ord;
+            }
+
+            let dc_a = a.objectives.as_ref().and_then(|o| o.values.get(2)).copied().unwrap_or(0.0);
+            let dc_b = b.objectives.as_ref().and_then(|o| o.values.get(2)).copied().unwrap_or(0.0);
+            dc_a.abs().partial_cmp(&dc_b.abs()).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Diversity Selection: Filter duplicates to prevent clone stagnation
+        let mut next_pop = Vec::new();
+        let mut seen_topologies = std::collections::HashSet::new();
+
+        for r in &scored {
+            if next_pop.len() < self.config.population_size {
+                let topo_sig = r.circuit.to_netlist("SIG");
+                if seen_topologies.insert(topo_sig) {
+                    next_pop.push(r.circuit.clone());
+                }
+            }
+        }
+
+        let unique_topologies = seen_topologies.len();
+        let duration_ms = gen_start.elapsed().as_millis();
+        let mut best_fitness = 0.0;
+
+        if let Some(best) = scored.first() {
+            best_fitness = best.fitness_score;
+            let best_obj_summary = best.objectives.as_ref().map(|o| o.summary()).unwrap_or_default();
+            println!(
+                "[Gen {:>2}] Eval: {:>2} | Rej: {:>2} (Gate: {:>2}, Val: {:>2}) | Scored: {:>2} | Uniq: {:>2} | Best: {:.6} | Time: {}ms | {}",
+                gen_idx, total_eval, gate_rejected + val_rejected, gate_rejected, val_rejected, scored_count, unique_topologies, best.fitness_score, duration_ms, best_obj_summary
+            );
+            log::debug!(
+                "Gen {} preset: best_fit={:.6}, scored={}/{}, uniq={}",
+                gen_idx,
+                best.fitness_score,
+                scored_count,
+                total_eval,
+                unique_topologies
+            );
+
+            // Archive candidates:
+            // 1. Champion is always considered first
+            // 2. Additional slots select diverse high-performing candidates maximizing novelty
+            let mut archived_in_gen = 0;
+            let mut archive_candidates: Vec<&CandidateResult> = Vec::new();
+            archive_candidates.push(best);
+
+            // Identify high-performing candidates (>= 50% of champion fitness) with unique topologies
+            let mut seen_archive_topos = std::collections::HashSet::new();
+            seen_archive_topos.insert(best.circuit.to_netlist("SIG"));
+
+            let min_viable_fitness = (best.fitness_score * 0.5).max(0.2);
+            let mut diverse_pool = Vec::new();
+
+            for cand in scored.iter().skip(1) {
+                if cand.fitness_score < min_viable_fitness {
+                    break;
+                }
+                let sig = cand.circuit.to_netlist("SIG");
+                if seen_archive_topos.insert(sig) {
+                    diverse_pool.push(cand);
+                    if diverse_pool.len() >= 6 {
+                        break;
+                    }
+                }
+            }
+
+            // Score diverse pool by novelty distance to current archive
+            let mut novelty_scored: Vec<(&CandidateResult, f64)> = Vec::new();
+            for cand in diverse_pool {
+                if let Ok(desc) = extract_behavior_descriptor(&cand.circuit, stray_pf, timeout) {
+                    let nn_dist = self.archive.min_distance(&desc);
+                    novelty_scored.push((cand, nn_dist));
+                }
+            }
+
+            // Sort by novelty distance descending (most novel first)
+            novelty_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+            for (cand, _) in novelty_scored.into_iter().take(2) {
+                archive_candidates.push(cand);
+            }
+
+            for cand in archive_candidates {
+                if cand.fitness_score <= 0.0 || archived_in_gen >= 3 {
+                    break;
+                }
+                let cand_summary = cand.objectives.as_ref().map(|o| o.summary()).unwrap_or_default();
+                match extract_behavior_descriptor(&cand.circuit, stray_pf, timeout) {
+                    Ok(desc) => {
+                        let nn_dist = self.archive.min_distance(&desc);
+                        let best_archived_fit = self.archive.entries.iter().filter_map(|e| e.fitness).fold(0.0, f64::max);
+                        let is_breakthrough = cand.fitness_score > best_archived_fit;
+                        let is_duplicate = !self.archive.is_empty()
+                            && nn_dist < self.config.min_novelty_dist
+                            && !is_breakthrough;
+
+                        if !is_duplicate {
+                            let mc_dev_db = evaluate_monte_carlo(
+                                &cand.circuit,
+                                self.config.monte_carlo_runs,
+                                0.05,
+                                stray_pf,
+                                timeout,
+                            )
+                            .ok()
+                            .map(|rep| rep.max_deviation_db);
+
+                            let effective_min_dist = if is_breakthrough { 0.0 } else { self.config.min_novelty_dist };
+                            let added = self.archive.maybe_add_with_meta(
+                                cand.circuit.clone(),
+                                desc,
+                                0.0,
+                                self.config.k_neighbors,
+                                effective_min_dist,
+                                mc_dev_db,
+                                gen_idx,
+                                Some(cand.fitness_score),
+                                Some(cand_summary),
+                            );
+
+                            if added {
+                                archived_in_gen += 1;
+                                let nn_report = if nn_dist.is_finite() { nn_dist } else { 1.0 };
+                                let rarity = evaluate_rarity(nn_report, mc_dev_db, &desc);
+                                let mc_str = mc_dev_db
+                                    .map(|v| format!("{:.1}dB", v))
+                                    .unwrap_or_else(|| "--".to_string());
+                                println!(
+                                    "  {} DROP  #{} | fit={:.4} | nn={:.3} mc={} | {}",
+                                    rarity.colored_label(),
+                                    self.archive.len() - 1,
+                                    cand.fitness_score,
+                                    nn_report,
+                                    mc_str,
+                                    describe_character(&desc)
+                                );
+                                log::info!(
+                                    "Discovery drop #{} [{:?}] fit={:.4}, mc={}",
+                                    self.archive.len() - 1,
+                                    rarity,
+                                    cand.fitness_score,
+                                    mc_str
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        if archived_in_gen == 0 && std::ptr::eq(cand, best) {
+                            eprintln!(
+                                "  [Gen {}] Champion characterization failed, not archived: {}",
+                                gen_idx, e
+                            );
+                            log::warn!("Gen {} champion characterization failed: {}", gen_idx, e);
+                        }
+                    }
+                }
+            }
+        } else {
+            println!(
+                "[Gen {:>2}] Eval: {:>2} | Rej: {:>2} (Gate: {:>2}, Val: {:>2}) | Scored:  0 | Feasibility Gate dropped all candidates | Time: {}ms",
+                gen_idx, total_eval, gate_rejected + val_rejected, gate_rejected, val_rejected, duration_ms
+            );
+            log::warn!("Gen {} feasibility gate dropped all candidates", gen_idx);
+        }
+
+        // Fill remaining population slots with fresh mutations of surviving parents (diversity injection)
+        let mut fill_idx = 0;
+        while next_pop.len() < self.config.population_size {
+            if !next_pop.is_empty() {
+                let parent = &next_pop[fill_idx % next_pop.len()];
+                next_pop.push(mutate(parent));
+                fill_idx += 1;
+            } else if !self.population.is_empty() {
+                let parent = &self.population[fill_idx % self.population.len()];
+                next_pop.push(mutate(parent));
+                fill_idx += 1;
+            } else {
+                let fresh = crate::mutate::seed_discrete_population(1);
+                next_pop.push(fresh[0].clone());
+            }
+        }
+
+        self.population = next_pop;
+
+        GenerationStats {
+            generation: gen_idx,
+            valid_topologies: self.config.population_size,
+            constraint_passed: scored_count,
+            archive_size: self.archive.len(),
+            max_novelty: best_fitness,
+            avg_novelty: if scored_count > 0 { best_fitness } else { 0.0 },
+            duration_ms,
+        }
+    }
+
+    /// Single generation step in Novelty Search Mode
+    fn step_novelty_generation(&mut self, gen_idx: usize, timeout: Duration) -> GenerationStats {
+        let gen_start = Instant::now();
+
+        // 1. Create mutant offspring from previous population
+        let offspring: Vec<Circuit> = self
+            .population
+            .iter()
+            .map(|parent| mutate(parent))
+            .collect();
+
+        // 2. Parallel Evaluation via Rayon across all CPU cores
+        let stray_pf = self.config.stray_cap_pf;
+        let eval_results: Vec<CandidateResult> = offspring
+            .into_par_iter()
+            .map(|circuit| {
+                // Fast graph topology validation (0ms)
+                if let Err(e) = circuit.validate() {
+                    return CandidateResult {
+                        circuit,
+                        descriptor: None,
+                        objectives: None,
+                        fitness_score: 0.0,
+                        reject_reason: Some(format!("Validate: {:?}", e)),
+                    };
+                }
+
+                // Single-pass characterization simulation
+                let netlist = to_characterization_netlist(&circuit, "Gen Eval", stray_pf);
+                let sim_res = match run_simulation(&netlist, timeout) {
+                    Ok(res) => res,
+                    Err(e) => {
+                        return CandidateResult {
+                            circuit,
+                            descriptor: None,
+                            objectives: None,
+                            fitness_score: 0.0,
+                            reject_reason: Some(format!("SPICE: {}", e)),
+                        };
+                    }
+                };
+
+                // S3 Constraint check (fail fast on rails, dead signal, DC offset, phase jump)
+                if let Err(reject) = check(&sim_res, circuit.vcc, circuit.vee) {
+                    return CandidateResult {
+                        circuit,
+                        descriptor: None,
+                        objectives: None,
+                        fitness_score: 0.0,
+                        reject_reason: Some(format!("Constraint: {:?}", reject)),
+                    };
+                }
+
+                let ac_data = match sim_res.ac_response {
+                    Some(d) => d,
+                    None => {
+                        return CandidateResult {
+                            circuit,
+                            descriptor: None,
+                            objectives: None,
+                            fitness_score: 0.0,
+                            reject_reason: Some("Missing AC".to_string()),
+                        };
+                    }
+                };
+                let tran_s = match sim_res.tran_small {
+                    Some(d) => d,
+                    None => {
+                        return CandidateResult {
+                            circuit,
+                            descriptor: None,
+                            objectives: None,
+                            fitness_score: 0.0,
+                            reject_reason: Some("Missing TranSmall".to_string()),
+                        };
+                    }
+                };
+                let tran_l = match sim_res.tran_large {
+                    Some(d) => d,
+                    None => {
+                        return CandidateResult {
+                            circuit,
+                            descriptor: None,
+                            objectives: None,
+                            fitness_score: 0.0,
+                            reject_reason: Some("Missing TranLarge".to_string()),
+                        };
+                    }
+                };
+                let tran_z = sim_res.tran_zero.unwrap_or_default();
+
+                let (has_filt, ac_c, ac_s, ac_q) = extract_ac_features(&ac_data);
+                let (asym, h2, h3, h5, comp) = extract_nonlinear_features(&tran_s, &tran_l);
+                let (osc_r, osc_f) = extract_oscillation_features(&tran_z);
+
+                let desc: BehaviorDescriptor =
+                    [has_filt, ac_c, ac_s, ac_q, asym, h2, h3, h5, comp, osc_r, osc_f];
+
+                CandidateResult {
+                    circuit,
+                    descriptor: Some(desc),
+                    objectives: None,
+                    fitness_score: 0.0,
+                    reject_reason: None,
+                }
+            })
+            .collect();
+
+        // 3. Sequential Novelty Evaluation and Archive Updates
+        let mut passed_candidates = Vec::new();
+        let mut novelty_scores = Vec::new();
+
+        for res in eval_results {
+            if let Some(desc) = res.descriptor {
+                let score = self.archive.novelty_score(&desc, self.config.k_neighbors);
+                novelty_scores.push(score);
+
+                let nearest_dist = self.archive.min_distance(&desc);
+
+                // Candidate qualifies for the Novelty Archive if:
+                // 1. Distance to nearest neighbor >= min_novelty_dist (prevents near-duplicate pollution)
+                // 2. Average k-NN score >= novelty_threshold (or initial seed fill)
+                if (score >= self.config.novelty_threshold && nearest_dist >= self.config.min_novelty_dist)
+                    || self.archive.len() < self.config.k_neighbors
+                {
+                    // Monte Carlo Robustness Gate: Run runs ONLY for novel discoveries
+                    let mc_report = evaluate_monte_carlo(
+                        &res.circuit,
+                        self.config.monte_carlo_runs,
+                        0.05,
+                        stray_pf,
+                        timeout,
+                    );
+
+                    let dev_db = match &mc_report {
+                        Ok(rep) => {
+                            println!(
+                                "  [Gen {} Novelty Discovery] Score: {:.4}, Dev: {:.2}dB, Runs: {}/{}",
+                                gen_idx, score, rep.max_deviation_db, rep.runs_passed, rep.total_runs
+                            );
+                            log::info!(
+                                "Gen {} novelty discovery: score={:.4}, dev={:.2}dB",
+                                gen_idx,
+                                score,
+                                rep.max_deviation_db
+                            );
+                            Some(rep.max_deviation_db)
+                        }
+                        Err(_) => None,
+                    };
+
+                    self.archive.maybe_add(
+                        res.circuit.clone(),
+                        desc,
+                        self.config.novelty_threshold,
+                        self.config.k_neighbors,
+                        self.config.min_novelty_dist,
+                        dev_db,
+                    );
+                }
+
+                passed_candidates.push((res.circuit, score));
+            }
+        }
+
+        // 4. Survival Selection: Keep the highest-novelty candidates
+        passed_candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        let mut next_pop = Vec::new();
+        for (c, _) in passed_candidates {
+            if next_pop.len() < self.config.population_size {
+                next_pop.push(c);
+            }
+        }
+
+        // Fill any vacancies with mutants from current population or archive
+        let mut fill_idx = 0;
+        while next_pop.len() < self.config.population_size {
+            if !self.archive.entries.is_empty() {
+                let seed = &self.archive.entries[fill_idx % self.archive.entries.len()].circuit;
+                next_pop.push(mutate(seed));
+            } else if !self.population.is_empty() {
+                let seed = &self.population[fill_idx % self.population.len()];
+                next_pop.push(mutate(seed));
+            } else {
+                break;
+            }
+            fill_idx += 1;
+        }
+
+        self.population = next_pop;
+
+        let max_nov = novelty_scores
+            .iter()
+            .cloned()
+            .fold(0.0, f64::max);
+        let avg_nov = if !novelty_scores.is_empty() {
+            novelty_scores.iter().sum::<f64>() / (novelty_scores.len() as f64)
+        } else {
+            0.0
+        };
+
+        let duration_ms = gen_start.elapsed().as_millis();
+
+        let stats = GenerationStats {
+            generation: gen_idx,
+            valid_topologies: self.config.population_size,
+            constraint_passed: novelty_scores.len(),
+            archive_size: self.archive.len(),
+            max_novelty: max_nov,
+            avg_novelty: avg_nov,
+            duration_ms,
+        };
+
+        println!(
+            "Gen {:>3} | Passed: {:>2}/{} | Archive: {:>3} | Max Nov: {:.4} | Avg Nov: {:.4} | Time: {}ms",
+            gen_idx,
+            stats.constraint_passed,
+            self.config.population_size,
+            stats.archive_size,
+            stats.max_novelty,
+            stats.avg_novelty,
+            stats.duration_ms
+        );
+        log::debug!(
+            "Gen {} novelty: passed={}/{}, archive={}, max_nov={:.4}, avg_nov={:.4}, time={}ms",
+            gen_idx,
+            stats.constraint_passed,
+            self.config.population_size,
+            stats.archive_size,
+            stats.max_novelty,
+            stats.avg_novelty,
+            stats.duration_ms
+        );
+
+        stats
     }
 
     /// Serialize current state to a JSON checkpoint file

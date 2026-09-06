@@ -489,29 +489,86 @@ pub fn export_bench_from_checkpoint(
     println!("  - Reference AC:  {:?}", report.reference_ac_path);
     println!("  - SPICE Netlist: {:?}", report.netlist_path);
 
-    // Automatically render AoE SchemDraw schematic via uv
+    // Automatically render AoE SchemDraw schematic via uv or python fallback
     let svg_path = target_dir.join("schematic.svg");
+    if let Err(e) = render_schematic_svg(checkpoint_path, circuit_id, &svg_path) {
+        log::warn!("Schematic rendering skipped: {}", e);
+    } else {
+        println!("  - AoE Schematic: {:?}", svg_path);
+    }
+
+    Ok(report.output_dir)
+}
+
+/// Execute schematic rendering using multi-tier fallback:
+/// 1. `uv run --with schemdraw python scripts/schematic.py ...` (via UV_PATH, IMBIK_UV, or PATH)
+/// 2. Direct `python scripts/schematic.py ...`
+/// 3. Direct `python3 scripts/schematic.py ...`
+/// 4. Direct `py -3 scripts/schematic.py ...`
+pub fn render_schematic_svg(
+    checkpoint_path: &Path,
+    circuit_id: usize,
+    target_svg: &Path,
+) -> Result<(), String> {
+    if let Some(parent) = target_svg.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+
+    let cp_str = checkpoint_path.to_str().unwrap_or("");
+    let id_str = circuit_id.to_string();
+    let out_str = target_svg.to_str().unwrap_or("");
+
+    // 1. Try uv with ephemeral schemdraw environment
     let uv_bin = get_uv_cmd();
-    let status = std::process::Command::new(&uv_bin)
+    log::debug!("Attempting schematic rendering via uv binary: '{}'", uv_bin);
+    let uv_result = std::process::Command::new(&uv_bin)
         .args([
             "run",
             "--with",
             "schemdraw",
             "python",
             "scripts/schematic.py",
-            checkpoint_path.to_str().unwrap_or(""),
-            &circuit_id.to_string(),
-            svg_path.to_str().unwrap_or(""),
+            cp_str,
+            &id_str,
+            out_str,
         ])
         .status();
 
-    if let Ok(st) = status {
-        if st.success() {
-            println!("  - AoE Schematic: {:?}", svg_path);
+    if let Ok(st) = uv_result {
+        if st.success() && target_svg.exists() {
+            log::debug!("Schematic rendering succeeded via uv");
+            return Ok(());
+        }
+        log::debug!("uv execution finished with non-zero exit code: {:?}", st.code());
+    } else if let Err(ref e) = uv_result {
+        log::debug!("uv launch failed ({:?}), falling back to direct python interpreters", e.kind());
+    }
+
+    // 2. Try direct python interpreters if uv is missing or failed
+    let python_candidates = ["python", "python3", "py"];
+    for py_cmd in &python_candidates {
+        log::debug!("Attempting schematic rendering via direct interpreter '{}'", py_cmd);
+        let mut cmd = std::process::Command::new(py_cmd);
+        if *py_cmd == "py" {
+            cmd.arg("-3");
+        }
+        cmd.args(["scripts/schematic.py", cp_str, &id_str, out_str]);
+
+        if let Ok(st) = cmd.status() {
+            if st.success() && target_svg.exists() {
+                log::debug!("Schematic rendering succeeded via '{}'", py_cmd);
+                return Ok(());
+            }
         }
     }
 
-    Ok(report.output_dir)
+    Err(format!(
+        "Failed to render schematic for circuit #{}. Neither uv ('{}') nor system Python with 'schemdraw' could execute 'scripts/schematic.py'.\n\
+         To enable schematic rendering:\n\
+           • Install uv (recommended): https://astral.sh/uv (or 'cargo install uv')\n\
+           • OR install schemdraw: 'pip install schemdraw'",
+        circuit_id, uv_bin
+    ))
 }
 
 /// Render standalone AoE SchemDraw schematic
@@ -523,37 +580,8 @@ pub fn draw_circuit_schematic(
     let default_svg = PathBuf::from(format!("bench/circuit_{:02}/schematic.svg", circuit_id));
     let target_svg = out_svg.unwrap_or(&default_svg);
 
-    if let Some(parent) = target_svg.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    let uv_bin = get_uv_cmd();
-    let status = std::process::Command::new(&uv_bin)
-        .args([
-            "run",
-            "--with",
-            "schemdraw",
-            "python",
-            "scripts/schematic.py",
-            checkpoint_path.to_str().unwrap_or(""),
-            &circuit_id.to_string(),
-            target_svg.to_str().unwrap_or(""),
-        ])
-        .status()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                format!(
-                    "uv binary '{}' not found in PATH or UV_PATH. Please install uv (https://astral.sh/uv) or set UV_PATH environment variable.",
-                    uv_bin
-                )
-            } else {
-                format!("Failed to execute '{}': {}", uv_bin, e)
-            }
-        })?;
-
-    if !status.success() {
-        return Err(format!("schemdraw renderer failed with status: {}", status).into());
-    }
+    render_schematic_svg(checkpoint_path, circuit_id, target_svg)
+        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
 
     println!("\n✅ AoE SchemDraw schematic successfully generated: {:?}", target_svg);
     Ok(target_svg.to_path_buf())

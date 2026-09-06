@@ -19,29 +19,44 @@ freq = 1000.0
 vin = 0.1
 r_load = 10000.0
 
-# 2. Cutoff Frequency Probe: -3 dB attenuation (gain ≈ 0.707) at 10 kHz
+# 2. Flat Passband Probe: Near-unity gain (≈ 0.97 / -0.3 dB) at 5 kHz
+# Eliminates high-Q resonance peaking and unphysical feedback cheats before cutoff
+[[probes]]
+name = "Passband@5kHz"
+probe_type = "Gain"
+kind = "Closeness"
+want = 0.97
+soft = 0.65
+weight = 3.5
+require = true
+
+[probes.condition]
+freq = 5000.0
+vin = 0.1
+r_load = 10000.0
+
+# 3. Cutoff Frequency Probe: -3 dB attenuation (gain ≈ 0.707) at 10 kHz
 [[probes]]
 name = "Cutoff@10kHz"
 probe_type = "Gain"
 kind = "Closeness"
 want = 0.707
-soft = 0.10
+soft = 0.20
 weight = 3.5
-require = false
+require = true
 
 [probes.condition]
 freq = 10000.0
 vin = 0.1
 r_load = 10000.0
 
-# 3. Stopband Attenuation Probe: Strong attenuation (< 0.05 / -26 dB) at 50 kHz
-# Note: soft=1.05 provides continuous gradient from op-amp buffer (gain ~1.0) down to stopband
+# 4. Stopband Attenuation Probe: Strong attenuation (< 0.04 / -28 dB) at 50 kHz
 [[probes]]
 name = "Stopband@50kHz"
 probe_type = "Gain"
 kind = "Lesser"
-want = 0.05
-soft = 1.05
+want = 0.040
+soft = 0.250
 weight = 4.0
 require = false
 
@@ -50,7 +65,23 @@ freq = 50000.0
 vin = 0.1
 r_load = 10000.0
 
-# 4. DC Offset Probe: Near-zero DC offset at op-amp output (< 20mV ideal, < 500mV soft)
+# 5. High-Frequency 2nd-Order Probe: True 40 dB/dec rolloff (< 0.010 / -40 dB) at 100 kHz
+# Eliminates 1st-order RC filters (which stay near -20 dB / 0.10)
+[[probes]]
+name = "Stopband@100kHz"
+probe_type = "Gain"
+kind = "Lesser"
+want = 0.010
+soft = 0.100
+weight = 4.0
+require = false
+
+[probes.condition]
+freq = 100000.0
+vin = 0.1
+r_load = 10000.0
+
+# 6. DC Offset Probe: Near-zero DC offset at op-amp output (< 20mV ideal, < 500mV soft)
 [[probes]]
 name = "DcOffset"
 probe_type = "DcOffset"
@@ -65,18 +96,17 @@ freq = 0.0
 vin = 0.0
 r_load = 10000.0
 
-# 5. BOM Count Probe: Textbook Sallen-Key uses 5 components (1 Op-Amp + 2 R + 2 C)
+# 7. BOM Count Probe: Textbook Sallen-Key uses 5 components (1 Op-Amp + 2 R + 2 C)
 [[probes]]
 name = "BOM_Count"
 probe_type = "Bom"
 kind = "Lesser"
 want = 5.0
-soft = 12.0
-weight = 1.0
+soft = 8.0
+weight = 2.0
 require = false
 
 [probes.condition]
 freq = 0.0
 vin = 0.0
 r_load = 0.0
-

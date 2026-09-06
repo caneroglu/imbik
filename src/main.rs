@@ -9,11 +9,100 @@ pub mod preset;
 pub mod realism;
 pub mod spice;
 
+use clap::{Parser, Subcommand};
 use engine::{EvolutionConfig, EvolutionEngine};
-use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "imbik",
+    version = "0.1.0",
+    about = "Autonomous Analog Circuit Hunter Engine",
+    after_help = "Examples:\n  imbik list\n  imbik show best\n  imbik draw 0 circuit.svg\n  imbik bench 0\n  imbik evolve --preset buffer 50\n  imbik ingest scope.csv 0"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Display colorized loot table of discovered circuits
+    List {
+        /// Optional path to checkpoint JSON file
+        checkpoint: Option<PathBuf>,
+    },
+
+    /// Inspect details, netlist & pin map of a circuit
+    Show {
+        /// Circuit ID number, or "best" / "latest"
+        #[arg(default_value = "best")]
+        id: String,
+
+        /// Optional path to checkpoint JSON file
+        checkpoint: Option<PathBuf>,
+    },
+
+    /// Generate publication-quality AoE SchemDraw schematic
+    Draw {
+        /// Circuit ID number, or "best"
+        #[arg(default_value = "best")]
+        id: String,
+
+        /// Destination SVG path (default: bench/circuit_XX/schematic.svg)
+        out_svg: Option<PathBuf>,
+
+        /// Optional path to checkpoint JSON file
+        checkpoint: Option<PathBuf>,
+    },
+
+    /// Export breadboard BOM, protocol, CSV & schematic
+    Bench {
+        /// Circuit ID number, or "best"
+        #[arg(default_value = "best")]
+        id: String,
+
+        /// Output directory (default: bench/circuit_XX)
+        out_dir: Option<PathBuf>,
+
+        /// Optional path to checkpoint JSON file
+        checkpoint: Option<PathBuf>,
+    },
+
+    /// Ingest oscilloscope capture & verify physical reality
+    Ingest {
+        /// Path to oscilloscope CSV capture file
+        scope_csv: PathBuf,
+
+        /// Target circuit ID (default: 0)
+        #[arg(default_value_t = 0)]
+        circuit_id: usize,
+
+        /// Optional path to checkpoint JSON file
+        checkpoint: Option<PathBuf>,
+    },
+
+    /// Launch mission-driven or novelty discovery engine
+    Evolve {
+        /// Target mission preset name (e.g. 'buffer', 'gyrator') or TOML file path
+        #[arg(short, long)]
+        preset: Option<String>,
+
+        /// Population size
+        #[arg(long, default_value_t = 20)]
+        pop: usize,
+
+        /// RNG seed (decimal or 0xHEX format)
+        #[arg(long)]
+        seed: Option<String>,
+
+        /// Maximum generations to run
+        #[arg(default_value_t = 50)]
+        generations: usize,
+    },
+}
 
 fn find_default_checkpoint() -> PathBuf {
     let candidates = [
@@ -33,45 +122,67 @@ fn find_default_checkpoint() -> PathBuf {
     PathBuf::from("checkpoints/checkpoint_final.json")
 }
 
-fn print_help() {
-    println!("Usage:");
-    println!("  imbik list [checkpoint.json]               - Display colorized loot table of discovered circuits");
-    println!("  imbik show <id> [checkpoint.json]          - Inspect details, netlist & pin map of a circuit");
-    println!("  imbik draw <id> [out.svg] [checkpoint]     - Generate publication-quality AoE SchemDraw schematic");
-    println!("  imbik bench <id> [out_dir] [checkpoint]    - Export breadboard BOM, protocol, CSV & schematic");
-    println!("  imbik ingest <scope.csv> [id] [checkpoint] - Ingest oscilloscope capture & verify physical reality");
-    println!("  imbik evolve [--preset <name>] [gens]      - Launch mission-driven or novelty discovery engine");
-    println!("  imbik help                                 - Show this help menu\n");
+fn resolve_circuit_id(id_str: &str, views: &[loot::ArchiveItemView]) -> Result<usize, String> {
+    if id_str == "best" || id_str == "latest" {
+        views
+            .iter()
+            .max_by(|a, b| {
+                let fit_a = a.fitness.unwrap_or(a.nn_dist);
+                let fit_b = b.fitness.unwrap_or(b.nn_dist);
+                fit_a.partial_cmp(&fit_b).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .map(|v| v.id)
+            .ok_or_else(|| "Archive is empty".to_string())
+    } else {
+        id_str
+            .parse::<usize>()
+            .map_err(|_| format!("Invalid circuit ID: '{}'. Expected integer or 'best'", id_str))
+    }
+}
+
+fn parse_seed_str(s: &str) -> Result<u64, String> {
+    let s_trim = s.trim();
+    if s_trim.starts_with("0x") || s_trim.starts_with("0X") {
+        u64::from_str_radix(&s_trim[2..], 16)
+            .map_err(|e| format!("Invalid hex seed '{}': {}", s_trim, e))
+    } else {
+        s_trim
+            .parse::<u64>()
+            .map_err(|e| format!("Invalid u64 seed '{}': {}", s_trim, e))
+    }
 }
 
 fn main() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+
     println!("============================================================");
     println!("  İmbik v0.1.0 - Autonomous Analog Circuit Hunter Engine   ");
     println!("============================================================");
 
-    let args: Vec<String> = env::args().collect();
+    let cli = Cli::parse();
 
-    if args.len() <= 1 {
-        let default_cp = find_default_checkpoint();
-        if default_cp.exists() {
-            println!("Found existing discovery archive at: {:?}", default_cp);
-            println!("Displaying loot table:\n");
-            if let Err(e) = loot::list_archive(&default_cp) {
-                eprintln!("Error reading archive: {}", e);
-            }
-        } else {
-            print_help();
-        }
-        return;
-    }
-
-    match args[1].as_str() {
-        "list" => {
-            let cp_path = if args.len() >= 3 {
-                PathBuf::from(&args[2])
+    let command = match cli.command {
+        Some(cmd) => cmd,
+        None => {
+            let default_cp = find_default_checkpoint();
+            if default_cp.exists() {
+                println!("Found existing discovery archive at: {:?}", default_cp);
+                println!("Displaying loot table:\n");
+                if let Err(e) = loot::list_archive(&default_cp) {
+                    eprintln!("Error reading archive: {}", e);
+                }
             } else {
-                find_default_checkpoint()
-            };
+                use clap::CommandFactory;
+                let _ = Cli::command().print_help();
+                println!();
+            }
+            return;
+        }
+    };
+
+    match command {
+        Commands::List { checkpoint } => {
+            let cp_path = checkpoint.unwrap_or_else(find_default_checkpoint);
 
             if !cp_path.exists() {
                 eprintln!("Error: Checkpoint file not found: {:?}", cp_path);
@@ -84,12 +195,8 @@ fn main() {
             }
         }
 
-        "show" => {
-            let cp_path = if args.len() >= 4 {
-                PathBuf::from(&args[3])
-            } else {
-                find_default_checkpoint()
-            };
+        Commands::Show { id, checkpoint } => {
+            let cp_path = checkpoint.unwrap_or_else(find_default_checkpoint);
 
             let views = match loot::load_archive_views(&cp_path) {
                 Ok(v) => v,
@@ -104,128 +211,89 @@ fn main() {
                 std::process::exit(1);
             }
 
-            let id: usize = if args.len() < 3 || args[2] == "best" || args[2] == "latest" {
-                // Find candidate with highest fitness or highest NN distance
-                views
-                    .iter()
-                    .max_by(|a, b| {
-                        let fit_a = a.fitness.unwrap_or(a.nn_dist);
-                        let fit_b = b.fitness.unwrap_or(b.nn_dist);
-                        fit_a.partial_cmp(&fit_b).unwrap_or(std::cmp::Ordering::Equal)
-                    })
-                    .map(|v| v.id)
-                    .unwrap_or(0)
-            } else {
-                match args[2].parse() {
-                    Ok(n) => n,
-                    Err(_) => {
-                        eprintln!("Error: Invalid circuit ID: {}", args[2]);
-                        std::process::exit(1);
-                    }
+            let circuit_id = match resolve_circuit_id(&id, &views) {
+                Ok(n) => n,
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
                 }
             };
 
-            if let Err(e) = loot::show_circuit(&cp_path, id) {
+            if let Err(e) = loot::show_circuit(&cp_path, circuit_id) {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
         }
 
-        "bench" => {
-            let cp_path = if args.len() >= 5 {
-                PathBuf::from(&args[4])
-            } else {
-                find_default_checkpoint()
-            };
+        Commands::Bench {
+            id,
+            out_dir,
+            checkpoint,
+        } => {
+            let cp_path = checkpoint.unwrap_or_else(find_default_checkpoint);
 
-            let id: usize = if args.len() < 3 || args[2] == "best" {
-                let views = loot::load_archive_views(&cp_path).unwrap_or_default();
-                views
-                    .iter()
-                    .max_by(|a, b| {
-                        let fit_a = a.fitness.unwrap_or(a.nn_dist);
-                        let fit_b = b.fitness.unwrap_or(b.nn_dist);
-                        fit_a.partial_cmp(&fit_b).unwrap_or(std::cmp::Ordering::Equal)
-                    })
-                    .map(|v| v.id)
-                    .unwrap_or(0)
-            } else {
-                match args[2].parse() {
-                    Ok(n) => n,
-                    Err(_) => {
-                        eprintln!("Error: Invalid circuit ID: {}", args[2]);
-                        std::process::exit(1);
-                    }
+            let views = match loot::load_archive_views(&cp_path) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("Error reading archive: {}", e);
+                    std::process::exit(1);
                 }
             };
 
-            let out_dir = args.get(3).map(|s| Path::new(s));
+            let circuit_id = match resolve_circuit_id(&id, &views) {
+                Ok(n) => n,
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            };
 
-            if let Err(e) = loot::export_bench_from_checkpoint(&cp_path, id, out_dir) {
+            if let Err(e) = loot::export_bench_from_checkpoint(&cp_path, circuit_id, out_dir.as_deref()) {
                 eprintln!("Error exporting bench package: {}", e);
                 std::process::exit(1);
             }
         }
 
-        "draw" => {
-            let cp_path = if args.len() >= 5 {
-                PathBuf::from(&args[4])
-            } else {
-                find_default_checkpoint()
-            };
+        Commands::Draw {
+            id,
+            out_svg,
+            checkpoint,
+        } => {
+            let cp_path = checkpoint.unwrap_or_else(find_default_checkpoint);
 
-            let id: usize = if args.len() < 3 || args[2] == "best" {
-                let views = loot::load_archive_views(&cp_path).unwrap_or_default();
-                views
-                    .iter()
-                    .max_by(|a, b| {
-                        let fit_a = a.fitness.unwrap_or(a.nn_dist);
-                        let fit_b = b.fitness.unwrap_or(b.nn_dist);
-                        fit_a.partial_cmp(&fit_b).unwrap_or(std::cmp::Ordering::Equal)
-                    })
-                    .map(|v| v.id)
-                    .unwrap_or(0)
-            } else {
-                match args[2].parse() {
-                    Ok(n) => n,
-                    Err(_) => {
-                        eprintln!("Error: Invalid circuit ID: {}", args[2]);
-                        std::process::exit(1);
-                    }
+            let views = match loot::load_archive_views(&cp_path) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("Error reading archive: {}", e);
+                    std::process::exit(1);
                 }
             };
 
-            let out_svg = args.get(3).map(|s| Path::new(s));
+            let circuit_id = match resolve_circuit_id(&id, &views) {
+                Ok(n) => n,
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            };
 
-            if let Err(e) = loot::draw_circuit_schematic(&cp_path, id, out_svg) {
+            if let Err(e) = loot::draw_circuit_schematic(&cp_path, circuit_id, out_svg.as_deref()) {
                 eprintln!("Error generating schematic: {}", e);
                 std::process::exit(1);
             }
         }
 
-        "ingest" => {
-            if args.len() < 3 {
-                eprintln!("Usage: imbik ingest <scope_capture.csv> [circuit_id] [checkpoint_path]");
+        Commands::Ingest {
+            scope_csv,
+            circuit_id,
+            checkpoint,
+        } => {
+            if !scope_csv.exists() {
+                eprintln!("Error: Oscilloscope capture file not found: {:?}", scope_csv);
                 std::process::exit(1);
             }
 
-            let scope_csv_path = PathBuf::from(&args[2]);
-            if !scope_csv_path.exists() {
-                eprintln!("Error: Oscilloscope capture file not found: {:?}", scope_csv_path);
-                std::process::exit(1);
-            }
-
-            let circuit_id: usize = if args.len() >= 4 {
-                args[3].parse().unwrap_or(0)
-            } else {
-                0
-            };
-
-            let cp_path = if args.len() >= 5 {
-                PathBuf::from(&args[4])
-            } else {
-                find_default_checkpoint()
-            };
+            let cp_path = checkpoint.unwrap_or_else(find_default_checkpoint);
 
             if !cp_path.exists() {
                 eprintln!("Error: Checkpoint file not found: {:?}", cp_path);
@@ -253,11 +321,11 @@ fn main() {
             println!("\n============================================================");
             println!("  🔬 Physical Hardware Verification & Oscilloscope Ingest    ");
             println!("============================================================");
-            println!("Scope Capture:     {:?}", scope_csv_path);
+            println!("Scope Capture:     {:?}", scope_csv);
             println!("SPICE Reference:   {:?}", ref_csv_path);
             println!("Target Circuit ID: #{}", circuit_id);
 
-            match bench::ingest_scope_data(&scope_csv_path, &ref_csv_path) {
+            match bench::ingest_scope_data(&scope_csv, &ref_csv_path) {
                 Ok(res) => {
                     println!("\n{}", res.details);
                     if res.is_verified {
@@ -289,60 +357,34 @@ fn main() {
             }
         }
 
-        "evolve" => {
+        Commands::Evolve {
+            preset,
+            pop,
+            seed,
+            generations,
+        } => {
             let mut config = EvolutionConfig::default();
-            let mut idx = 2;
-            while idx < args.len() {
-                match args[idx].as_str() {
-                    "--preset" | "-p" => {
-                        if idx + 1 < args.len() {
-                            idx += 1;
-                            let preset_name = &args[idx];
-                            match preset::Preset::load_or_builtin(preset_name) {
-                                Ok(p) => config.preset = Some(p),
-                                Err(err) => {
-                                    eprintln!("Error loading preset: {}", err);
-                                    std::process::exit(1);
-                                }
-                            }
-                        } else {
-                            eprintln!("Error: --preset requires a preset name or file path");
-                            std::process::exit(1);
-                        }
-                    }
-                    "--pop" => {
-                        if idx + 1 < args.len() {
-                            idx += 1;
-                            if let Ok(pop) = args[idx].parse() {
-                                config.population_size = pop;
-                            }
-                        }
-                    }
-                    "--seed" => {
-                        if idx + 1 < args.len() {
-                            idx += 1;
-                            let s_str = &args[idx];
-                            let parsed = if s_str.starts_with("0x") || s_str.starts_with("0X") {
-                                u64::from_str_radix(&s_str[2..], 16)
-                            } else {
-                                s_str.parse::<u64>()
-                            };
-                            match parsed {
-                                Ok(s) => config.seed = Some(s),
-                                Err(_) => {
-                                    eprintln!("Error: Invalid u64 seed: {}", s_str);
-                                    std::process::exit(1);
-                                }
-                            }
-                        }
-                    }
-                    val => {
-                        if let Ok(gens) = val.parse() {
-                            config.max_generations = gens;
-                        }
+            config.population_size = pop;
+            config.max_generations = generations;
+
+            if let Some(preset_name) = preset {
+                match preset::Preset::load_or_builtin(&preset_name) {
+                    Ok(p) => config.preset = Some(p),
+                    Err(err) => {
+                        eprintln!("Error loading preset: {}", err);
+                        std::process::exit(1);
                     }
                 }
-                idx += 1;
+            }
+
+            if let Some(s_str) = seed {
+                match parse_seed_str(&s_str) {
+                    Ok(s) => config.seed = Some(s),
+                    Err(e) => {
+                        eprintln!("Error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
             }
 
             let running = Arc::new(AtomicBool::new(true));
@@ -366,15 +408,6 @@ fn main() {
                     eprintln!("Engine execution error: {}", e);
                 }
             }
-        }
-
-        "help" | "-h" | "--help" => {
-            print_help();
-        }
-
-        other => {
-            eprintln!("Unknown command: '{}'", other);
-            print_help();
         }
     }
 }

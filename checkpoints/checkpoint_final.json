@@ -1,8 +1,8 @@
 {
-  "generation": 25,
+  "generation": 30,
   "config": {
-    "population_size": 30,
-    "max_generations": 25,
+    "population_size": 20,
+    "max_generations": 30,
     "novelty_threshold": 0.5,
     "min_novelty_dist": 0.25,
     "k_neighbors": 3,
@@ -13,66 +13,80 @@
     "monte_carlo_runs": 20,
     "seed": null,
     "preset": {
-      "name": "cap_multiplier",
-      "description": "Textbook Active Capacitance Multiplier (Synthetic 10uF Capacitor using 1 Op-Amp, Rl, C, R1)",
+      "name": "sallen_key_10k",
+      "description": "10kHz 2nd-Order Sallen-Key Active Lowpass Filter (Op-Amp Hunting)",
       "feasibility_max_dc": 0.5,
       "feasibility_rail_margin": 1.65,
       "allow_opamps": true,
       "probes": [
         {
-          "name": "Passband@10Hz",
+          "name": "Passband@1kHz",
           "probe_type": "Gain",
           "condition": {
-            "freq": 10.0,
+            "freq": 1000.0,
             "vin": 0.1,
             "r_load": 10000.0
           },
           "kind": "Closeness",
           "want": 1.0,
-          "soft": 0.5,
-          "weight": 4.0,
+          "soft": 0.8,
+          "weight": 3.0,
           "is_required": true
         },
         {
-          "name": "Stopband@1kHz",
+          "name": "Passband@5kHz",
           "probe_type": "Gain",
           "condition": {
-            "freq": 1000.0,
+            "freq": 5000.0,
+            "vin": 0.1,
+            "r_load": 10000.0
+          },
+          "kind": "Closeness",
+          "want": 0.97,
+          "soft": 0.65,
+          "weight": 3.5,
+          "is_required": true
+        },
+        {
+          "name": "Cutoff@10kHz",
+          "probe_type": "Gain",
+          "condition": {
+            "freq": 10000.0,
+            "vin": 0.1,
+            "r_load": 10000.0
+          },
+          "kind": "Closeness",
+          "want": 0.707,
+          "soft": 0.2,
+          "weight": 3.5,
+          "is_required": true
+        },
+        {
+          "name": "Stopband@50kHz",
+          "probe_type": "Gain",
+          "condition": {
+            "freq": 50000.0,
             "vin": 0.1,
             "r_load": 10000.0
           },
           "kind": "Lesser",
-          "want": 0.25,
-          "soft": 1.01,
-          "weight": 5.0,
+          "want": 0.04,
+          "soft": 0.25,
+          "weight": 4.0,
           "is_required": false
         },
         {
-          "name": "Zin@10Hz",
-          "probe_type": "Zin",
+          "name": "Stopband@100kHz",
+          "probe_type": "Gain",
           "condition": {
-            "freq": 10.0,
-            "vin": 0.1,
-            "r_load": 10000.0
-          },
-          "kind": "Greater",
-          "want": 1200.0,
-          "soft": 300.0,
-          "weight": 5.0,
-          "is_required": false
-        },
-        {
-          "name": "Zin@1kHz",
-          "probe_type": "Zin",
-          "condition": {
-            "freq": 1000.0,
+            "freq": 100000.0,
             "vin": 0.1,
             "r_load": 10000.0
           },
           "kind": "Lesser",
-          "want": 150.0,
-          "soft": 5000.0,
-          "weight": 5.0,
+          "want": 0.01,
+          "soft": 0.1,
+          "weight": 4.0,
           "is_required": false
         },
         {
@@ -84,7 +98,7 @@
             "r_load": 10000.0
           },
           "kind": "Lesser",
-          "want": 0.05,
+          "want": 0.02,
           "soft": 0.5,
           "weight": 1.5,
           "is_required": false
@@ -98,105 +112,32 @@
             "r_load": 0.0
           },
           "kind": "Lesser",
-          "want": 4.0,
+          "want": 5.0,
           "soft": 8.0,
-          "weight": 1.0,
+          "weight": 2.0,
           "is_required": false
         }
       ]
     }
   },
   "stats": {
-    "generation": 25,
-    "valid_topologies": 30,
-    "constraint_passed": 30,
+    "generation": 30,
+    "valid_topologies": 20,
+    "constraint_passed": 36,
     "archive_size": 15,
-    "max_novelty": 1.0,
-    "avg_novelty": 1.0,
-    "duration_ms": 0
+    "max_novelty": 0.9573850760575028,
+    "avg_novelty": 0.9573850760575028,
+    "duration_ms": 1360
   },
   "archive": {
     "entries": [
       {
         "circuit": {
           "nodes": [
-            1,
             3,
-            0,
-            4,
-            10,
-            2
-          ],
-          "components": [
-            {
-              "comp_type": "R",
-              "id": 1,
-              "nodes": [
-                1,
-                10
-              ],
-              "value": "10k"
-            },
-            {
-              "comp_type": "X",
-              "id": 1,
-              "nodes": [
-                10,
-                2,
-                3,
-                4,
-                2
-              ],
-              "value": "TL072"
-            },
-            {
-              "comp_type": "R",
-              "id": 2,
-              "nodes": [
-                2,
-                4
-              ],
-              "value": "5.1k"
-            },
-            {
-              "comp_type": "C",
-              "id": 1,
-              "nodes": [
-                10,
-                4
-              ],
-              "value": "270nF"
-            }
-          ],
-          "vcc": 9.0,
-          "vee": -9.0
-        },
-        "descriptor": [
-          1.0,
-          0.35650963421023374,
-          0.4775748161532376,
-          0.0,
-          2.1434081939886163e-11,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0
-        ],
-        "mc_dev_db": 0.8938988392158365,
-        "generation": 1,
-        "fitness": 0.7621724580465117,
-        "obj_summary": "*Passband@10Hz=0.99 (sc=0.97) | Stopband@1kHz=0.06 (sc=1.00) | Zin@10Hz=59778.88 (sc=1.00) | Zin@1kHz=10016.53 (sc=0.00) | DcOffset=0.00 (sc=1.00) | BOM_Count=4.00 (sc=1.00)",
-        "is_hardware_verified": false
-      },
-      {
-        "circuit": {
-          "nodes": [
-            0,
-            3,
-            4,
             1,
+            4,
+            0,
             2
           ],
           "components": [
@@ -211,15 +152,6 @@
                 2
               ],
               "value": "TL072"
-            },
-            {
-              "comp_type": "R",
-              "id": 1,
-              "nodes": [
-                0,
-                1
-              ],
-              "value": "1.6k"
             }
           ],
           "vcc": 9.0,
@@ -240,19 +172,75 @@
         ],
         "mc_dev_db": 0.0,
         "generation": 1,
-        "fitness": 0.61350720531112,
-        "obj_summary": "*Passband@10Hz=1.00 (sc=1.00) | Stopband@1kHz=1.00 (sc=0.01) | Zin@10Hz=1600.00 (sc=1.00) | Zin@1kHz=1600.00 (sc=0.32) | DcOffset=0.00 (sc=1.00) | BOM_Count=2.00 (sc=1.00)",
+        "fitness": 0.5185789798205674,
+        "obj_summary": "*Passband@1kHz=1.00 (sc=1.00) | *Passband@5kHz=1.00 (sc=0.91) | *Cutoff@10kHz=1.00 (sc=0.42) | Stopband@50kHz=1.00 (sc=0.00) | Stopband@100kHz=1.00 (sc=0.00) | DcOffset=0.00 (sc=1.00) | BOM_Count=1.00 (sc=1.00)",
         "is_hardware_verified": false
       },
       {
         "circuit": {
           "nodes": [
-            1,
-            3,
             0,
+            2,
+            3,
             4,
             10,
-            2
+            1
+          ],
+          "components": [
+            {
+              "comp_type": "R",
+              "id": 1,
+              "nodes": [
+                1,
+                10
+              ],
+              "value": "11k"
+            },
+            {
+              "comp_type": "X",
+              "id": 1,
+              "nodes": [
+                10,
+                2,
+                3,
+                4,
+                2
+              ],
+              "value": "TL072"
+            }
+          ],
+          "vcc": 9.0,
+          "vee": -9.0
+        },
+        "descriptor": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          2.355906297517372e-7,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "mc_dev_db": 0.029008178276612007,
+        "generation": 1,
+        "fitness": 0.5186299867880145,
+        "obj_summary": "*Passband@1kHz=1.00 (sc=1.00) | *Passband@5kHz=1.00 (sc=0.91) | *Cutoff@10kHz=1.00 (sc=0.42) | Stopband@50kHz=1.00 (sc=0.00) | Stopband@100kHz=0.99 (sc=0.00) | DcOffset=0.00 (sc=1.00) | BOM_Count=2.00 (sc=1.00)",
+        "is_hardware_verified": false
+      },
+      {
+        "circuit": {
+          "nodes": [
+            20,
+            1,
+            10,
+            2,
+            3,
+            4,
+            0
           ],
           "components": [
             {
@@ -263,6 +251,247 @@
                 10
               ],
               "value": "10k"
+            },
+            {
+              "comp_type": "R",
+              "id": 2,
+              "nodes": [
+                10,
+                20
+              ],
+              "value": "11k"
+            },
+            {
+              "comp_type": "X",
+              "id": 1,
+              "nodes": [
+                20,
+                2,
+                3,
+                4,
+                2
+              ],
+              "value": "TL072"
+            },
+            {
+              "comp_type": "C",
+              "id": 1,
+              "nodes": [
+                20,
+                1
+              ],
+              "value": "1.2nF"
+            }
+          ],
+          "vcc": 9.0,
+          "vee": -9.0
+        },
+        "descriptor": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          6.699897558752406e-7,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "mc_dev_db": 0.030121934769543557,
+        "generation": 3,
+        "fitness": 0.529544448263023,
+        "obj_summary": "*Passband@1kHz=1.00 (sc=1.00) | *Passband@5kHz=0.99 (sc=0.94) | *Cutoff@10kHz=0.98 (sc=0.46) | Stopband@50kHz=0.97 (sc=0.00) | Stopband@100kHz=0.97 (sc=0.00) | DcOffset=0.00 (sc=1.00) | BOM_Count=4.00 (sc=1.00)",
+        "is_hardware_verified": false
+      },
+      {
+        "circuit": {
+          "nodes": [
+            20,
+            1,
+            21,
+            10,
+            2,
+            3,
+            4,
+            0
+          ],
+          "components": [
+            {
+              "comp_type": "R",
+              "id": 1,
+              "nodes": [
+                1,
+                21
+              ],
+              "value": "10k"
+            },
+            {
+              "comp_type": "R",
+              "id": 2,
+              "nodes": [
+                10,
+                20
+              ],
+              "value": "11k"
+            },
+            {
+              "comp_type": "X",
+              "id": 1,
+              "nodes": [
+                20,
+                2,
+                3,
+                4,
+                2
+              ],
+              "value": "TL072"
+            },
+            {
+              "comp_type": "C",
+              "id": 1,
+              "nodes": [
+                20,
+                1
+              ],
+              "value": "1.2nF"
+            },
+            {
+              "comp_type": "R",
+              "id": 3,
+              "nodes": [
+                21,
+                10
+              ],
+              "value": "10k"
+            }
+          ],
+          "vcc": 9.0,
+          "vee": -9.0
+        },
+        "descriptor": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.65180142188441e-7,
+          0.0,
+          0.0,
+          0.0,
+          1.6323211260438342e-7,
+          0.0,
+          0.0
+        ],
+        "mc_dev_db": 0.03840333715117844,
+        "generation": 5,
+        "fitness": 0.5373664102852828,
+        "obj_summary": "*Passband@1kHz=1.00 (sc=0.99) | *Passband@5kHz=0.98 (sc=0.97) | *Cutoff@10kHz=0.97 (sc=0.48) | Stopband@50kHz=0.96 (sc=0.00) | Stopband@100kHz=0.96 (sc=0.00) | DcOffset=0.00 (sc=1.00) | BOM_Count=5.00 (sc=1.00)",
+        "is_hardware_verified": false
+      },
+      {
+        "circuit": {
+          "nodes": [
+            20,
+            1,
+            21,
+            10,
+            2,
+            3,
+            4,
+            0
+          ],
+          "components": [
+            {
+              "comp_type": "R",
+              "id": 1,
+              "nodes": [
+                1,
+                21
+              ],
+              "value": "10k"
+            },
+            {
+              "comp_type": "R",
+              "id": 2,
+              "nodes": [
+                10,
+                20
+              ],
+              "value": "11k"
+            },
+            {
+              "comp_type": "X",
+              "id": 1,
+              "nodes": [
+                20,
+                2,
+                3,
+                4,
+                2
+              ],
+              "value": "TL072"
+            },
+            {
+              "comp_type": "C",
+              "id": 1,
+              "nodes": [
+                20,
+                1
+              ],
+              "value": "1nF"
+            },
+            {
+              "comp_type": "R",
+              "id": 3,
+              "nodes": [
+                21,
+                10
+              ],
+              "value": "10k"
+            }
+          ],
+          "vcc": 9.0,
+          "vee": -9.0
+        },
+        "descriptor": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.7324366129361145e-7,
+          0.0,
+          0.0,
+          0.0,
+          2.312858035091736e-7,
+          0.0,
+          0.0
+        ],
+        "mc_dev_db": 0.032732212932911287,
+        "generation": 7,
+        "fitness": 0.5388845655134626,
+        "obj_summary": "*Passband@1kHz=1.00 (sc=0.99) | *Passband@5kHz=0.98 (sc=0.97) | *Cutoff@10kHz=0.97 (sc=0.49) | Stopband@50kHz=0.96 (sc=0.00) | Stopband@100kHz=0.96 (sc=0.00) | DcOffset=0.00 (sc=1.00) | BOM_Count=5.00 (sc=1.00)",
+        "is_hardware_verified": false
+      },
+      {
+        "circuit": {
+          "nodes": [
+            0,
+            2,
+            3,
+            4,
+            10,
+            1
+          ],
+          "components": [
+            {
+              "comp_type": "R",
+              "id": 1,
+              "nodes": [
+                1,
+                10
+              ],
+              "value": "9.1k"
             },
             {
               "comp_type": "X",
@@ -277,94 +506,13 @@
               "value": "TL072"
             },
             {
-              "comp_type": "R",
-              "id": 2,
-              "nodes": [
-                4,
-                2
-              ],
-              "value": "390k"
-            },
-            {
               "comp_type": "C",
               "id": 1,
-              "nodes": [
-                3,
-                10
-              ],
-              "value": "180nF"
-            }
-          ],
-          "vcc": 9.0,
-          "vee": -9.0
-        },
-        "descriptor": [
-          1.0,
-          0.39039050309524403,
-          0.4757882703904615,
-          0.0,
-          1.423074751788489e-9,
-          0.0,
-          0.0,
-          0.0,
-          7.281080183219046e-10,
-          0.0,
-          0.0
-        ],
-        "mc_dev_db": 1.3024697976755704,
-        "generation": 2,
-        "fitness": 0.7650570973023256,
-        "obj_summary": "*Passband@10Hz=0.99 (sc=0.99) | Stopband@1kHz=0.09 (sc=1.00) | Zin@10Hz=88961.49 (sc=1.00) | Zin@1kHz=10037.77 (sc=0.00) | DcOffset=0.00 (sc=1.00) | BOM_Count=4.00 (sc=1.00)",
-        "is_hardware_verified": false
-      },
-      {
-        "circuit": {
-          "nodes": [
-            0,
-            3,
-            4,
-            1,
-            2
-          ],
-          "components": [
-            {
-              "comp_type": "X",
-              "id": 1,
-              "nodes": [
-                1,
-                2,
-                3,
-                4,
-                2
-              ],
-              "value": "TL072"
-            },
-            {
-              "comp_type": "C",
-              "id": 1,
-              "nodes": [
-                2,
-                1
-              ],
-              "value": "680nF"
-            },
-            {
-              "comp_type": "C",
-              "id": 2,
-              "nodes": [
-                2,
-                1
-              ],
-              "value": "2.2uF"
-            },
-            {
-              "comp_type": "C",
-              "id": 3,
               "nodes": [
                 0,
-                1
+                10
               ],
-              "value": "220nF"
+              "value": "820pF"
             }
           ],
           "vcc": 9.0,
@@ -372,10 +520,10 @@
         },
         "descriptor": [
           1.0,
-          0.8865775804432152,
-          -0.02191619208647045,
+          0.8634836937147128,
+          0.39659058572194705,
           0.0,
-          5.442659511442843e-7,
+          1.2702883215406127e-6,
           0.0,
           0.0,
           0.0,
@@ -383,21 +531,21 @@
           0.0,
           0.0
         ],
-        "mc_dev_db": 10.166007997352319,
-        "generation": 3,
-        "fitness": 0.6662217233026512,
-        "obj_summary": "*Passband@10Hz=1.00 (sc=1.00) | Stopband@1kHz=1.00 (sc=0.01) | Zin@10Hz=72266.71 (sc=1.00) | Zin@1kHz=722.65 (sc=0.55) | DcOffset=0.00 (sc=1.00) | BOM_Count=4.00 (sc=1.00)",
+        "mc_dev_db": 1.0149708367740828,
+        "generation": 8,
+        "fitness": 0.5636796382582012,
+        "obj_summary": "*Passband@1kHz=1.00 (sc=0.99) | *Passband@5kHz=0.97 (sc=0.99) | *Cutoff@10kHz=0.90 (sc=0.62) | Stopband@50kHz=0.38 (sc=0.00) | Stopband@100kHz=0.20 (sc=0.00) | DcOffset=0.00 (sc=1.00) | BOM_Count=3.00 (sc=1.00)",
         "is_hardware_verified": false
       },
       {
         "circuit": {
           "nodes": [
-            1,
-            3,
             0,
+            2,
+            3,
             4,
             10,
-            2
+            1
           ],
           "components": [
             {
@@ -422,31 +570,13 @@
               "value": "TL072"
             },
             {
-              "comp_type": "R",
-              "id": 2,
-              "nodes": [
-                4,
-                2
-              ],
-              "value": "390k"
-            },
-            {
               "comp_type": "C",
               "id": 1,
               "nodes": [
-                3,
+                0,
                 10
               ],
-              "value": "180nF"
-            },
-            {
-              "comp_type": "R",
-              "id": 3,
-              "nodes": [
-                1,
-                2
-              ],
-              "value": "24"
+              "value": "820pF"
             }
           ],
           "vcc": 9.0,
@@ -454,288 +584,33 @@
         },
         "descriptor": [
           1.0,
-          0.39033959727660483,
-          0.05822486936763519,
+          0.8552925696671154,
+          0.4013753828646503,
           0.0,
-          0.006812878570174494,
-          0.006066471717954451,
-          0.18169598362312808,
-          0.08130118775038825,
-          0.0,
-          0.0,
-          0.0
-        ],
-        "mc_dev_db": 19.403540716210415,
-        "generation": 3,
-        "fitness": 0.7534278072558139,
-        "obj_summary": "*Passband@10Hz=0.99 (sc=0.99) | Stopband@1kHz=0.08 (sc=1.00) | Zin@10Hz=213.04 (sc=0.00) | Zin@1kHz=24.04 (sc=1.00) | DcOffset=0.00 (sc=1.00) | BOM_Count=5.00 (sc=0.75)",
-        "is_hardware_verified": false
-      },
-      {
-        "circuit": {
-          "nodes": [
-            1,
-            3,
-            0,
-            4,
-            10,
-            2
-          ],
-          "components": [
-            {
-              "comp_type": "R",
-              "id": 1,
-              "nodes": [
-                1,
-                10
-              ],
-              "value": "9.1k"
-            },
-            {
-              "comp_type": "X",
-              "id": 1,
-              "nodes": [
-                10,
-                2,
-                3,
-                4,
-                2
-              ],
-              "value": "TL072"
-            },
-            {
-              "comp_type": "R",
-              "id": 2,
-              "nodes": [
-                2,
-                4
-              ],
-              "value": "5.1k"
-            },
-            {
-              "comp_type": "C",
-              "id": 1,
-              "nodes": [
-                10,
-                4
-              ],
-              "value": "270nF"
-            },
-            {
-              "comp_type": "R",
-              "id": 3,
-              "nodes": [
-                3,
-                1
-              ],
-              "value": "3.9k"
-            }
-          ],
-          "vcc": 9.0,
-          "vee": -9.0
-        },
-        "descriptor": [
-          1.0,
-          0.3642928518761523,
-          0.4771436441180817,
-          0.0,
-          2.7346155357516055e-9,
+          1.8819311098676792e-7,
           0.0,
           0.0,
           0.0,
-          0.0,
+          2.3295136563072916e-6,
           0.0,
           0.0
         ],
-        "mc_dev_db": 1.6149037308456187,
-        "generation": 5,
-        "fitness": 0.7914928418708085,
-        "obj_summary": "*Passband@10Hz=0.99 (sc=0.98) | Stopband@1kHz=0.06 (sc=1.00) | Zin@10Hz=3853.59 (sc=1.00) | Zin@1kHz=2732.89 (sc=0.17) | DcOffset=0.00 (sc=1.00) | BOM_Count=5.00 (sc=0.75)",
-        "is_hardware_verified": false
-      },
-      {
-        "circuit": {
-          "nodes": [
-            1,
-            3,
-            0,
-            4,
-            10,
-            2
-          ],
-          "components": [
-            {
-              "comp_type": "R",
-              "id": 1,
-              "nodes": [
-                1,
-                10
-              ],
-              "value": "10k"
-            },
-            {
-              "comp_type": "X",
-              "id": 1,
-              "nodes": [
-                10,
-                2,
-                3,
-                4,
-                2
-              ],
-              "value": "TL072"
-            },
-            {
-              "comp_type": "R",
-              "id": 2,
-              "nodes": [
-                2,
-                4
-              ],
-              "value": "5.1k"
-            },
-            {
-              "comp_type": "C",
-              "id": 1,
-              "nodes": [
-                10,
-                4
-              ],
-              "value": "270nF"
-            },
-            {
-              "comp_type": "C",
-              "id": 2,
-              "nodes": [
-                2,
-                10
-              ],
-              "value": "470nF"
-            },
-            {
-              "comp_type": "R",
-              "id": 3,
-              "nodes": [
-                1,
-                2
-              ],
-              "value": "91"
-            }
-          ],
-          "vcc": 9.0,
-          "vee": -9.0
-        },
-        "descriptor": [
-          1.0,
-          0.35648181834556014,
-          0.09460861110630239,
-          0.0,
-          0.00004019556445699138,
-          0.0,
-          0.0,
-          0.0,
-          5.713492549741517e-6,
-          0.0,
-          0.0
-        ],
-        "mc_dev_db": 19.97480991456328,
-        "generation": 6,
-        "fitness": 0.8372259056767285,
-        "obj_summary": "*Passband@10Hz=0.99 (sc=0.97) | Stopband@1kHz=0.06 (sc=1.00) | Zin@10Hz=539.06 (sc=0.42) | Zin@1kHz=90.33 (sc=1.00) | DcOffset=0.00 (sc=1.00) | BOM_Count=6.00 (sc=0.50)",
-        "is_hardware_verified": false
-      },
-      {
-        "circuit": {
-          "nodes": [
-            1,
-            3,
-            0,
-            4,
-            10,
-            2
-          ],
-          "components": [
-            {
-              "comp_type": "R",
-              "id": 1,
-              "nodes": [
-                1,
-                10
-              ],
-              "value": "10k"
-            },
-            {
-              "comp_type": "X",
-              "id": 1,
-              "nodes": [
-                10,
-                2,
-                3,
-                4,
-                2
-              ],
-              "value": "TL072"
-            },
-            {
-              "comp_type": "R",
-              "id": 2,
-              "nodes": [
-                2,
-                4
-              ],
-              "value": "5.1k"
-            },
-            {
-              "comp_type": "C",
-              "id": 1,
-              "nodes": [
-                10,
-                4
-              ],
-              "value": "270nF"
-            },
-            {
-              "comp_type": "C",
-              "id": 2,
-              "nodes": [
-                2,
-                1
-              ],
-              "value": "150nF"
-            }
-          ],
-          "vcc": 9.0,
-          "vee": -9.0
-        },
-        "descriptor": [
-          1.0,
-          0.9956276156650479,
-          0.04121559916416965,
-          0.0,
-          0.000038992906275722716,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0
-        ],
-        "mc_dev_db": 2.4111599497759375,
+        "mc_dev_db": 1.1041831526037047,
         "generation": 9,
-        "fitness": 0.8536279202947941,
-        "obj_summary": "*Passband@10Hz=0.99 (sc=0.97) | Stopband@1kHz=0.06 (sc=1.00) | Zin@10Hz=59512.67 (sc=1.00) | Zin@1kHz=1056.67 (sc=0.44) | DcOffset=0.00 (sc=1.00) | BOM_Count=5.00 (sc=0.75)",
+        "fitness": 0.5684032473649594,
+        "obj_summary": "*Passband@1kHz=1.00 (sc=0.99) | *Passband@5kHz=0.97 (sc=0.99) | *Cutoff@10kHz=0.88 (sc=0.65) | Stopband@50kHz=0.35 (sc=0.00) | Stopband@100kHz=0.19 (sc=0.00) | DcOffset=0.00 (sc=1.00) | BOM_Count=3.00 (sc=1.00)",
         "is_hardware_verified": false
       },
       {
         "circuit": {
           "nodes": [
-            3,
-            4,
-            1,
-            2,
-            10,
             0,
-            21
+            2,
+            4,
+            10,
+            1,
+            21,
+            3
           ],
           "components": [
             {
@@ -743,9 +618,9 @@
               "id": 1,
               "nodes": [
                 1,
-                10
+                21
               ],
-              "value": "9.1k"
+              "value": "10k"
             },
             {
               "comp_type": "X",
@@ -760,49 +635,22 @@
               "value": "TL072"
             },
             {
-              "comp_type": "R",
-              "id": 2,
-              "nodes": [
-                2,
-                4
-              ],
-              "value": "5.1k"
-            },
-            {
               "comp_type": "C",
               "id": 1,
               "nodes": [
-                10,
-                4
-              ],
-              "value": "270nF"
-            },
-            {
-              "comp_type": "C",
-              "id": 2,
-              "nodes": [
-                2,
+                0,
                 10
               ],
-              "value": "470nF"
+              "value": "820pF"
             },
             {
               "comp_type": "R",
-              "id": 3,
-              "nodes": [
-                1,
-                21
-              ],
-              "value": "82"
-            },
-            {
-              "comp_type": "R",
-              "id": 4,
+              "id": 2,
               "nodes": [
                 21,
-                2
+                10
               ],
-              "value": "82"
+              "value": "10k"
             }
           ],
           "vcc": 9.0,
@@ -810,10 +658,10 @@
         },
         "descriptor": [
           1.0,
-          0.36427426871628865,
-          0.13474018384083247,
+          0.794516083719641,
+          0.42825744547512884,
           0.0,
-          0.000025559407483414717,
+          9.306651359696982e-7,
           0.0,
           0.0,
           0.0,
@@ -821,22 +669,107 @@
           0.0,
           0.0
         ],
-        "mc_dev_db": 25.62225660366228,
+        "mc_dev_db": 0.9377185363325324,
+        "generation": 10,
+        "fitness": 0.644341228491103,
+        "obj_summary": "*Passband@1kHz=0.99 (sc=0.97) | *Passband@5kHz=0.88 (sc=0.73) | *Cutoff@10kHz=0.68 (sc=0.96) | Stopband@50kHz=0.18 (sc=0.31) | Stopband@100kHz=0.09 (sc=0.08) | DcOffset=0.00 (sc=1.00) | BOM_Count=4.00 (sc=1.00)",
+        "is_hardware_verified": false
+      },
+      {
+        "circuit": {
+          "nodes": [
+            0,
+            2,
+            4,
+            10,
+            1,
+            21,
+            3,
+            22
+          ],
+          "components": [
+            {
+              "comp_type": "R",
+              "id": 1,
+              "nodes": [
+                1,
+                21
+              ],
+              "value": "10k"
+            },
+            {
+              "comp_type": "X",
+              "id": 1,
+              "nodes": [
+                10,
+                2,
+                3,
+                4,
+                2
+              ],
+              "value": "TL072"
+            },
+            {
+              "comp_type": "C",
+              "id": 1,
+              "nodes": [
+                0,
+                10
+              ],
+              "value": "820pF"
+            },
+            {
+              "comp_type": "R",
+              "id": 2,
+              "nodes": [
+                21,
+                22
+              ],
+              "value": "10k"
+            },
+            {
+              "comp_type": "R",
+              "id": 3,
+              "nodes": [
+                22,
+                10
+              ],
+              "value": "10k"
+            }
+          ],
+          "vcc": 9.0,
+          "vee": -9.0
+        },
+        "descriptor": [
+          1.0,
+          0.758602429827194,
+          0.439907766839157,
+          0.0,
+          4.5285794042633184e-7,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "mc_dev_db": 1.230892691437191,
         "generation": 11,
-        "fitness": 0.9343645691959183,
-        "obj_summary": "*Passband@10Hz=0.99 (sc=0.98) | Stopband@1kHz=0.06 (sc=1.00) | Zin@10Hz=1055.64 (sc=0.91) | Zin@1kHz=161.42 (sc=0.98) | DcOffset=0.00 (sc=1.00) | BOM_Count=7.00 (sc=0.25)",
+        "fitness": 0.6566365667274886,
+        "obj_summary": "*Passband@1kHz=0.99 (sc=0.94) | *Passband@5kHz=0.78 (sc=0.40) | *Cutoff@10kHz=0.53 (sc=0.65) | Stopband@50kHz=0.12 (sc=0.61) | Stopband@100kHz=0.06 (sc=0.43) | DcOffset=0.00 (sc=1.00) | BOM_Count=5.00 (sc=1.00)",
         "is_hardware_verified": false
       },
       {
         "circuit": {
           "nodes": [
-            3,
-            4,
-            1,
-            2,
-            10,
             0,
-            21
+            2,
+            4,
+            10,
+            1,
+            21,
+            3,
+            22
           ],
           "components": [
             {
@@ -844,9 +777,9 @@
               "id": 1,
               "nodes": [
                 1,
-                10
+                21
               ],
-              "value": "9.1k"
+              "value": "10k"
             },
             {
               "comp_type": "X",
@@ -861,49 +794,40 @@
               "value": "TL072"
             },
             {
-              "comp_type": "R",
-              "id": 2,
-              "nodes": [
-                2,
-                4
-              ],
-              "value": "5.1k"
-            },
-            {
               "comp_type": "C",
               "id": 1,
               "nodes": [
-                10,
-                4
-              ],
-              "value": "270nF"
-            },
-            {
-              "comp_type": "C",
-              "id": 2,
-              "nodes": [
-                2,
+                0,
                 10
               ],
-              "value": "470nF"
+              "value": "820pF"
+            },
+            {
+              "comp_type": "R",
+              "id": 2,
+              "nodes": [
+                21,
+                22
+              ],
+              "value": "10k"
             },
             {
               "comp_type": "R",
               "id": 3,
               "nodes": [
-                1,
-                21
+                22,
+                10
               ],
-              "value": "82"
+              "value": "10k"
             },
             {
-              "comp_type": "R",
-              "id": 4,
+              "comp_type": "C",
+              "id": 2,
               "nodes": [
-                21,
-                2
+                2,
+                22
               ],
-              "value": "91"
+              "value": "2.2nF"
             }
           ],
           "vcc": 9.0,
@@ -911,33 +835,34 @@
         },
         "descriptor": [
           1.0,
-          0.36427494938244825,
-          0.1382991773058872,
-          0.0,
-          0.000012143586513548715,
-          0.0,
-          0.0,
+          0.7871573436713091,
+          0.9546824176325236,
+          0.003172486920596602,
+          2.9151156172925767e-7,
           0.0,
           0.0,
+          0.0,
+          1.2143857273105851e-6,
           0.0,
           0.0
         ],
-        "mc_dev_db": 22.74729647708942,
-        "generation": 13,
-        "fitness": 0.9396850778105812,
-        "obj_summary": "*Passband@10Hz=0.99 (sc=0.98) | Stopband@1kHz=0.06 (sc=1.00) | Zin@10Hz=1112.49 (sc=0.95) | Zin@1kHz=170.11 (sc=0.96) | DcOffset=0.00 (sc=1.00) | BOM_Count=7.00 (sc=0.25)",
+        "mc_dev_db": 2.2845725630347715,
+        "generation": 12,
+        "fitness": 0.9271073364679812,
+        "obj_summary": "*Passband@1kHz=1.00 (sc=0.99) | *Passband@5kHz=0.98 (sc=0.98) | *Cutoff@10kHz=0.59 (sc=0.77) | Stopband@50kHz=0.03 (sc=1.00) | Stopband@100kHz=0.01 (sc=1.00) | DcOffset=0.00 (sc=1.00) | BOM_Count=6.00 (sc=0.67)",
         "is_hardware_verified": false
       },
       {
         "circuit": {
           "nodes": [
-            3,
-            4,
-            1,
-            2,
-            10,
             0,
-            21
+            2,
+            4,
+            10,
+            1,
+            21,
+            3,
+            22
           ],
           "components": [
             {
@@ -945,66 +870,336 @@
               "id": 1,
               "nodes": [
                 1,
+                21
+              ],
+              "value": "10k"
+            },
+            {
+              "comp_type": "X",
+              "id": 1,
+              "nodes": [
+                10,
+                2,
+                3,
+                4,
+                2
+              ],
+              "value": "TL072"
+            },
+            {
+              "comp_type": "C",
+              "id": 1,
+              "nodes": [
+                0,
+                10
+              ],
+              "value": "820pF"
+            },
+            {
+              "comp_type": "R",
+              "id": 2,
+              "nodes": [
+                21,
+                22
+              ],
+              "value": "10k"
+            },
+            {
+              "comp_type": "R",
+              "id": 3,
+              "nodes": [
+                22,
+                10
+              ],
+              "value": "9.1k"
+            },
+            {
+              "comp_type": "C",
+              "id": 2,
+              "nodes": [
+                2,
+                22
+              ],
+              "value": "1.8nF"
+            }
+          ],
+          "vcc": 9.0,
+          "vee": -9.0
+        },
+        "descriptor": [
+          1.0,
+          0.79042825924813,
+          0.9078588611756739,
+          0.0,
+          5.4375611880841846e-8,
+          0.0,
+          0.0,
+          0.0,
+          4.342742923046927e-7,
+          0.0,
+          0.0
+        ],
+        "mc_dev_db": 1.5447133028817532,
+        "generation": 16,
+        "fitness": 0.9276138162138856,
+        "obj_summary": "*Passband@1kHz=1.00 (sc=0.99) | *Passband@5kHz=0.94 (sc=0.90) | *Cutoff@10kHz=0.63 (sc=0.85) | Stopband@50kHz=0.04 (sc=1.00) | Stopband@100kHz=0.01 (sc=1.00) | DcOffset=0.00 (sc=1.00) | BOM_Count=6.00 (sc=0.67)",
+        "is_hardware_verified": false
+      },
+      {
+        "circuit": {
+          "nodes": [
+            0,
+            2,
+            4,
+            10,
+            1,
+            21,
+            3,
+            22
+          ],
+          "components": [
+            {
+              "comp_type": "R",
+              "id": 1,
+              "nodes": [
+                1,
+                21
+              ],
+              "value": "10k"
+            },
+            {
+              "comp_type": "X",
+              "id": 1,
+              "nodes": [
+                10,
+                2,
+                3,
+                4,
+                2
+              ],
+              "value": "TL072"
+            },
+            {
+              "comp_type": "C",
+              "id": 1,
+              "nodes": [
+                0,
+                10
+              ],
+              "value": "820pF"
+            },
+            {
+              "comp_type": "R",
+              "id": 2,
+              "nodes": [
+                21,
+                22
+              ],
+              "value": "9.1k"
+            },
+            {
+              "comp_type": "R",
+              "id": 3,
+              "nodes": [
+                22,
+                10
+              ],
+              "value": "9.1k"
+            },
+            {
+              "comp_type": "C",
+              "id": 2,
+              "nodes": [
+                2,
+                22
+              ],
+              "value": "1.8nF"
+            }
+          ],
+          "vcc": 9.0,
+          "vee": -9.0
+        },
+        "descriptor": [
+          1.0,
+          0.7932200929160833,
+          0.9104335211856451,
+          0.0,
+          1.0407525139841264e-7,
+          0.0,
+          0.0,
+          0.0,
+          1.4299993253974463e-6,
+          0.0,
+          0.0
+        ],
+        "mc_dev_db": 1.3666264507334995,
+        "generation": 19,
+        "fitness": 0.9387676199909346,
+        "obj_summary": "*Passband@1kHz=1.00 (sc=0.99) | *Passband@5kHz=0.95 (sc=0.92) | *Cutoff@10kHz=0.65 (sc=0.90) | Stopband@50kHz=0.04 (sc=1.00) | Stopband@100kHz=0.01 (sc=1.00) | DcOffset=0.00 (sc=1.00) | BOM_Count=6.00 (sc=0.67)",
+        "is_hardware_verified": false
+      },
+      {
+        "circuit": {
+          "nodes": [
+            0,
+            2,
+            4,
+            10,
+            1,
+            21,
+            3,
+            22
+          ],
+          "components": [
+            {
+              "comp_type": "R",
+              "id": 1,
+              "nodes": [
+                1,
+                21
+              ],
+              "value": "10k"
+            },
+            {
+              "comp_type": "X",
+              "id": 1,
+              "nodes": [
+                10,
+                2,
+                3,
+                4,
+                2
+              ],
+              "value": "TL072"
+            },
+            {
+              "comp_type": "C",
+              "id": 1,
+              "nodes": [
+                0,
+                10
+              ],
+              "value": "820pF"
+            },
+            {
+              "comp_type": "R",
+              "id": 2,
+              "nodes": [
+                21,
+                22
+              ],
+              "value": "8.2k"
+            },
+            {
+              "comp_type": "R",
+              "id": 3,
+              "nodes": [
+                22,
+                10
+              ],
+              "value": "9.1k"
+            },
+            {
+              "comp_type": "C",
+              "id": 2,
+              "nodes": [
+                2,
+                22
+              ],
+              "value": "1.8nF"
+            }
+          ],
+          "vcc": 9.0,
+          "vee": -9.0
+        },
+        "descriptor": [
+          1.0,
+          0.7960995391622439,
+          0.9130032623374017,
+          0.0,
+          4.686812999209352e-9,
+          0.0,
+          0.0,
+          0.0,
+          4.156164279400798e-8,
+          0.0,
+          0.0
+        ],
+        "mc_dev_db": 1.2967456298293616,
+        "generation": 21,
+        "fitness": 0.9499338241049572,
+        "obj_summary": "*Passband@1kHz=1.00 (sc=1.00) | *Passband@5kHz=0.95 (sc=0.95) | *Cutoff@10kHz=0.68 (sc=0.94) | Stopband@50kHz=0.04 (sc=1.00) | Stopband@100kHz=0.01 (sc=1.00) | DcOffset=0.00 (sc=1.00) | BOM_Count=6.00 (sc=0.67)",
+        "is_hardware_verified": false
+      },
+      {
+        "circuit": {
+          "nodes": [
+            0,
+            2,
+            4,
+            10,
+            1,
+            21,
+            3,
+            22
+          ],
+          "components": [
+            {
+              "comp_type": "R",
+              "id": 1,
+              "nodes": [
+                1,
+                21
+              ],
+              "value": "10k"
+            },
+            {
+              "comp_type": "X",
+              "id": 1,
+              "nodes": [
+                10,
+                2,
+                3,
+                4,
+                2
+              ],
+              "value": "TL072"
+            },
+            {
+              "comp_type": "C",
+              "id": 1,
+              "nodes": [
+                0,
+                10
+              ],
+              "value": "820pF"
+            },
+            {
+              "comp_type": "R",
+              "id": 2,
+              "nodes": [
+                21,
+                22
+              ],
+              "value": "9.1k"
+            },
+            {
+              "comp_type": "R",
+              "id": 3,
+              "nodes": [
+                22,
                 10
               ],
               "value": "8.2k"
             },
             {
-              "comp_type": "X",
-              "id": 1,
-              "nodes": [
-                10,
-                2,
-                3,
-                4,
-                2
-              ],
-              "value": "TL072"
-            },
-            {
-              "comp_type": "R",
-              "id": 2,
-              "nodes": [
-                2,
-                4
-              ],
-              "value": "5.1k"
-            },
-            {
-              "comp_type": "C",
-              "id": 1,
-              "nodes": [
-                10,
-                4
-              ],
-              "value": "270nF"
-            },
-            {
               "comp_type": "C",
               "id": 2,
               "nodes": [
                 2,
-                10
+                22
               ],
-              "value": "470nF"
-            },
-            {
-              "comp_type": "R",
-              "id": 3,
-              "nodes": [
-                1,
-                21
-              ],
-              "value": "75"
-            },
-            {
-              "comp_type": "R",
-              "id": 4,
-              "nodes": [
-                21,
-                2
-              ],
-              "value": "82"
+              "value": "2.2nF"
             }
           ],
           "vcc": 9.0,
@@ -1012,33 +1207,34 @@
         },
         "descriptor": [
           1.0,
-          0.37294557979050047,
-          0.13376502954009567,
+          0.7958411334221009,
+          0.9429001556498771,
+          0.0010473507079456904,
+          1.0040031169789574e-7,
           0.0,
-          0.00002329187257007169,
           0.0,
           0.0,
           0.0,
-          1.1244775333096868e-7,
           0.0,
           0.0
         ],
-        "mc_dev_db": 18.243320127465594,
-        "generation": 15,
-        "fitness": 0.9477061976006376,
-        "obj_summary": "*Passband@10Hz=0.99 (sc=0.98) | Stopband@1kHz=0.07 (sc=1.00) | Zin@10Hz=1117.81 (sc=0.95) | Zin@1kHz=154.43 (sc=0.99) | DcOffset=0.00 (sc=1.00) | BOM_Count=7.00 (sc=0.25)",
+        "mc_dev_db": 1.583322284810734,
+        "generation": 27,
+        "fitness": 0.9531530076611784,
+        "obj_summary": "*Passband@1kHz=1.00 (sc=1.00) | *Passband@5kHz=0.98 (sc=0.98) | *Cutoff@10kHz=0.67 (sc=0.93) | Stopband@50kHz=0.03 (sc=1.00) | Stopband@100kHz=0.01 (sc=1.00) | DcOffset=0.00 (sc=1.00) | BOM_Count=6.00 (sc=0.67)",
         "is_hardware_verified": false
       },
       {
         "circuit": {
           "nodes": [
-            3,
-            4,
-            1,
-            2,
-            10,
             0,
-            21
+            2,
+            4,
+            10,
+            1,
+            21,
+            3,
+            22
           ],
           "components": [
             {
@@ -1046,7 +1242,7 @@
               "id": 1,
               "nodes": [
                 1,
-                10
+                21
               ],
               "value": "9.1k"
             },
@@ -1066,138 +1262,37 @@
               "comp_type": "C",
               "id": 1,
               "nodes": [
-                10,
-                4
-              ],
-              "value": "220nF"
-            },
-            {
-              "comp_type": "C",
-              "id": 2,
-              "nodes": [
-                2,
+                0,
                 10
               ],
-              "value": "390nF"
+              "value": "820pF"
             },
             {
               "comp_type": "R",
-              "id": 3,
-              "nodes": [
-                1,
-                21
-              ],
-              "value": "82"
-            },
-            {
-              "comp_type": "R",
-              "id": 4,
+              "id": 2,
               "nodes": [
                 21,
-                2
+                22
               ],
-              "value": "82"
+              "value": "9.1k"
             },
             {
-              "comp_type": "C",
+              "comp_type": "R",
               "id": 3,
               "nodes": [
-                4,
-                1
-              ],
-              "value": "5.6nF"
-            }
-          ],
-          "vcc": 9.0,
-          "vee": -9.0
-        },
-        "descriptor": [
-          1.0,
-          0.3813902301443432,
-          0.11464611302246408,
-          0.0,
-          0.000043959321014787334,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0,
-          0.0
-        ],
-        "mc_dev_db": 27.02596032246405,
-        "generation": 17,
-        "fitness": 0.9572759189322816,
-        "obj_summary": "*Passband@10Hz=0.99 (sc=0.98) | Stopband@1kHz=0.08 (sc=1.00) | Zin@10Hz=1289.87 (sc=1.00) | Zin@1kHz=161.51 (sc=0.98) | DcOffset=0.00 (sc=1.00) | BOM_Count=7.00 (sc=0.25)",
-        "is_hardware_verified": false
-      },
-      {
-        "circuit": {
-          "nodes": [
-            3,
-            4,
-            1,
-            2,
-            10,
-            0,
-            21
-          ],
-          "components": [
-            {
-              "comp_type": "R",
-              "id": 1,
-              "nodes": [
-                1,
+                22,
                 10
               ],
               "value": "8.2k"
             },
             {
-              "comp_type": "X",
-              "id": 1,
+              "comp_type": "C",
+              "id": 2,
               "nodes": [
-                10,
                 2,
-                3,
-                4,
-                2
+                22
               ],
-              "value": "TL072"
-            },
-            {
-              "comp_type": "C",
-              "id": 1,
-              "nodes": [
-                10,
-                4
-              ],
-              "value": "270nF"
-            },
-            {
-              "comp_type": "R",
-              "id": 3,
-              "nodes": [
-                1,
-                21
-              ],
-              "value": "82"
-            },
-            {
-              "comp_type": "R",
-              "id": 4,
-              "nodes": [
-                21,
-                2
-              ],
-              "value": "82"
-            },
-            {
-              "comp_type": "C",
-              "id": 3,
-              "nodes": [
-                4,
-                1
-              ],
-              "value": "5.6nF"
+              "value": "2.2nF"
             }
           ],
           "vcc": 9.0,
@@ -1205,205 +1300,21 @@
         },
         "descriptor": [
           1.0,
-          0.3729593332892892,
-          0.1861650802452712,
-          0.0,
-          5.194804940706135e-6,
-          0.0,
-          0.0,
-          0.0,
-          7.179886940544833e-7,
-          0.0,
-          0.0
-        ],
-        "mc_dev_db": 23.826089846004407,
-        "generation": 20,
-        "fitness": 0.9636493740425618,
-        "obj_summary": "*Passband@10Hz=0.99 (sc=0.98) | Stopband@1kHz=0.07 (sc=1.00) | Zin@10Hz=1166.35 (sc=0.98) | Zin@1kHz=161.13 (sc=0.98) | DcOffset=0.00 (sc=1.00) | BOM_Count=6.00 (sc=0.50)",
-        "is_hardware_verified": false
-      },
-      {
-        "circuit": {
-          "nodes": [
-            3,
-            4,
-            1,
-            2,
-            10,
-            0,
-            21
-          ],
-          "components": [
-            {
-              "comp_type": "R",
-              "id": 1,
-              "nodes": [
-                1,
-                10
-              ],
-              "value": "9.1k"
-            },
-            {
-              "comp_type": "X",
-              "id": 1,
-              "nodes": [
-                10,
-                2,
-                3,
-                4,
-                2
-              ],
-              "value": "TL072"
-            },
-            {
-              "comp_type": "C",
-              "id": 1,
-              "nodes": [
-                10,
-                4
-              ],
-              "value": "220nF"
-            },
-            {
-              "comp_type": "R",
-              "id": 3,
-              "nodes": [
-                1,
-                21
-              ],
-              "value": "82"
-            },
-            {
-              "comp_type": "R",
-              "id": 4,
-              "nodes": [
-                21,
-                2
-              ],
-              "value": "82"
-            },
-            {
-              "comp_type": "C",
-              "id": 3,
-              "nodes": [
-                4,
-                1
-              ],
-              "value": "5.6nF"
-            }
-          ],
-          "vcc": 9.0,
-          "vee": -9.0
-        },
-        "descriptor": [
-          1.0,
-          0.38140367063258374,
-          0.18893994414287477,
-          0.0,
-          5.863263875197783e-6,
+          0.7986177891033727,
+          0.9456755041296914,
+          0.0016814958327308175,
+          3.4736935536984525e-7,
           0.0,
           0.0,
           0.0,
-          6.075004994610111e-7,
+          1.1770807661903859e-7,
           0.0,
           0.0
         ],
-        "mc_dev_db": 21.40095730468193,
-        "generation": 23,
-        "fitness": 0.9688973942282719,
-        "obj_summary": "*Passband@10Hz=0.99 (sc=0.98) | Stopband@1kHz=0.08 (sc=1.00) | Zin@10Hz=1290.04 (sc=1.00) | Zin@1kHz=161.53 (sc=0.98) | DcOffset=0.00 (sc=1.00) | BOM_Count=6.00 (sc=0.50)",
-        "is_hardware_verified": false
-      },
-      {
-        "circuit": {
-          "nodes": [
-            3,
-            4,
-            1,
-            2,
-            10,
-            0,
-            21
-          ],
-          "components": [
-            {
-              "comp_type": "R",
-              "id": 1,
-              "nodes": [
-                1,
-                10
-              ],
-              "value": "9.1k"
-            },
-            {
-              "comp_type": "X",
-              "id": 1,
-              "nodes": [
-                10,
-                2,
-                3,
-                4,
-                2
-              ],
-              "value": "TL072"
-            },
-            {
-              "comp_type": "C",
-              "id": 1,
-              "nodes": [
-                10,
-                4
-              ],
-              "value": "220nF"
-            },
-            {
-              "comp_type": "R",
-              "id": 3,
-              "nodes": [
-                1,
-                21
-              ],
-              "value": "75"
-            },
-            {
-              "comp_type": "R",
-              "id": 4,
-              "nodes": [
-                21,
-                2
-              ],
-              "value": "82"
-            },
-            {
-              "comp_type": "C",
-              "id": 3,
-              "nodes": [
-                4,
-                1
-              ],
-              "value": "5.6nF"
-            }
-          ],
-          "vcc": 9.0,
-          "vee": -9.0
-        },
-        "descriptor": [
-          1.0,
-          0.3814033716959029,
-          0.18584088284330966,
-          0.0,
-          9.061495355346463e-6,
-          0.0,
-          0.0,
-          0.0,
-          1.2166366308852261e-6,
-          0.0,
-          0.0
-        ],
-        "mc_dev_db": 22.13744405478186,
-        "generation": 24,
-        "fitness": 0.9717388123913785,
-        "obj_summary": "*Passband@10Hz=0.99 (sc=0.98) | Stopband@1kHz=0.08 (sc=1.00) | Zin@10Hz=1235.93 (sc=1.00) | Zin@1kHz=154.75 (sc=0.99) | DcOffset=0.00 (sc=1.00) | BOM_Count=6.00 (sc=0.50)",
+        "mc_dev_db": 2.0753773176234063,
+        "generation": 28,
+        "fitness": 0.9573850760575028,
+        "obj_summary": "*Passband@1kHz=1.00 (sc=1.00) | *Passband@5kHz=0.99 (sc=0.95) | *Cutoff@10kHz=0.70 (sc=0.98) | Stopband@50kHz=0.04 (sc=1.00) | Stopband@100kHz=0.01 (sc=1.00) | DcOffset=0.00 (sc=1.00) | BOM_Count=6.00 (sc=0.67)",
         "is_hardware_verified": false
       }
     ]
@@ -1411,13 +1322,14 @@
   "population": [
     {
       "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
         0,
-        21
+        2,
+        4,
+        10,
+        1,
+        21,
+        3,
+        22
       ],
       "components": [
         {
@@ -1425,7 +1337,7 @@
           "id": 1,
           "nodes": [
             1,
-            10
+            21
           ],
           "value": "9.1k"
         },
@@ -1444,1847 +1356,38 @@
         {
           "comp_type": "C",
           "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "220nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "75"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "C",
-          "id": 3,
-          "nodes": [
-            4,
-            1
-          ],
-          "value": "5.6nF"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "9.1k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "220nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "C",
-          "id": 3,
-          "nodes": [
-            4,
-            1
-          ],
-          "value": "5.6nF"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "9.1k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "220nF"
-        },
-        {
-          "comp_type": "C",
-          "id": 2,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "330nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "82"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "9.1k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "220nF"
-        },
-        {
-          "comp_type": "C",
-          "id": 2,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "470nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "75"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "91"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "9.1k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "220nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "91"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "C",
-          "id": 3,
-          "nodes": [
-            4,
-            1
-          ],
-          "value": "5.6nF"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "8.2k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "270nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "C",
-          "id": 3,
-          "nodes": [
-            4,
-            1
-          ],
-          "value": "5.6nF"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "9.1k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "220nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "91"
-        },
-        {
-          "comp_type": "R",
-          "id": 5,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "75"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "8.2k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "220nF"
-        },
-        {
-          "comp_type": "C",
-          "id": 2,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "390nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "75"
-        },
-        {
-          "comp_type": "C",
-          "id": 3,
-          "nodes": [
-            4,
-            1
-          ],
-          "value": "5.6nF"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "8.2k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "270nF"
-        },
-        {
-          "comp_type": "C",
-          "id": 2,
-          "nodes": [
-            2,
-            4
-          ],
-          "value": "470nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "75"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "82"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "8.2k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "270nF"
-        },
-        {
-          "comp_type": "C",
-          "id": 2,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "470nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "75"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "82"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "8.2k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "220nF"
-        },
-        {
-          "comp_type": "C",
-          "id": 2,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "390nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "C",
-          "id": 3,
-          "nodes": [
-            4,
-            1
-          ],
-          "value": "5.6nF"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "8.2k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "220nF"
-        },
-        {
-          "comp_type": "C",
-          "id": 2,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "330nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "C",
-          "id": 3,
-          "nodes": [
-            4,
-            1
-          ],
-          "value": "5.6nF"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "9.1k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "R",
-          "id": 2,
-          "nodes": [
-            2,
-            4
-          ],
-          "value": "5.1k"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "180nF"
-        },
-        {
-          "comp_type": "C",
-          "id": 2,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "470nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "75"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "91"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "9.1k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "220nF"
-        },
-        {
-          "comp_type": "C",
-          "id": 2,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "390nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "C",
-          "id": 3,
-          "nodes": [
-            4,
-            1
-          ],
-          "value": "5.6nF"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "9.1k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "R",
-          "id": 2,
-          "nodes": [
-            2,
-            4
-          ],
-          "value": "5.1k"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "220nF"
-        },
-        {
-          "comp_type": "C",
-          "id": 2,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "470nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "75"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "91"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "9.1k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "220nF"
-        },
-        {
-          "comp_type": "C",
-          "id": 2,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "470nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "75"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "91"
-        },
-        {
-          "comp_type": "R",
-          "id": 5,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "130k"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "9.1k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "R",
-          "id": 2,
-          "nodes": [
-            2,
-            4
-          ],
-          "value": "5.1k"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "220nF"
-        },
-        {
-          "comp_type": "C",
-          "id": 2,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "470nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "75"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "100"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "8.2k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "270nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "C",
-          "id": 3,
-          "nodes": [
-            4,
-            1
-          ],
-          "value": "5.6nF"
-        },
-        {
-          "comp_type": "C",
-          "id": 4,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "1nF"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "8.2k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "270nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "C",
-          "id": 3,
-          "nodes": [
-            4,
-            1
-          ],
-          "value": "5.6nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 5,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "820k"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "9.1k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "R",
-          "id": 2,
-          "nodes": [
-            2,
-            4
-          ],
-          "value": "5.6k"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "220nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "91"
-        },
-        {
-          "comp_type": "R",
-          "id": 5,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "75"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "9.1k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "R",
-          "id": 2,
-          "nodes": [
-            2,
-            4
-          ],
-          "value": "5.1k"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "220nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "91"
-        },
-        {
-          "comp_type": "R",
-          "id": 5,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "75"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "9.1k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "220nF"
-        },
-        {
-          "comp_type": "C",
-          "id": 2,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "330nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "R",
-          "id": 5,
-          "nodes": [
-            4,
-            10
-          ],
-          "value": "1Meg"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "8.2k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "220nF"
-        },
-        {
-          "comp_type": "C",
-          "id": 2,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "390nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "75"
-        },
-        {
-          "comp_type": "C",
-          "id": 3,
-          "nodes": [
-            4,
-            1
-          ],
-          "value": "5.6nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 5,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "820"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "7.5k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "R",
-          "id": 2,
-          "nodes": [
-            2,
-            4
-          ],
-          "value": "5.1k"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "270nF"
-        },
-        {
-          "comp_type": "C",
-          "id": 2,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "470nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "75"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "R",
-          "id": 5,
           "nodes": [
             0,
-            2
+            10
           ],
-          "value": "6.8k"
+          "value": "820pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            21,
+            22
+          ],
+          "value": "9.1k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            22,
+            10
+          ],
+          "value": "8.2k"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            22
+          ],
+          "value": "2.2nF"
         }
       ],
       "vcc": 9.0,
@@ -3292,13 +1395,14 @@
     },
     {
       "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
         0,
-        21
+        2,
+        4,
+        10,
+        1,
+        21,
+        3,
+        22
       ],
       "components": [
         {
@@ -3306,9 +1410,9 @@
           "id": 1,
           "nodes": [
             1,
-            10
+            21
           ],
-          "value": "7.5k"
+          "value": "10k"
         },
         {
           "comp_type": "X",
@@ -3323,67 +1427,40 @@
           "value": "TL072"
         },
         {
-          "comp_type": "R",
-          "id": 2,
-          "nodes": [
-            2,
-            4
-          ],
-          "value": "5.1k"
-        },
-        {
           "comp_type": "C",
           "id": 1,
           "nodes": [
-            10,
-            4
+            0,
+            10
           ],
-          "value": "270nF"
+          "value": "820pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            21,
+            22
+          ],
+          "value": "8.2k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            22,
+            10
+          ],
+          "value": "8.2k"
         },
         {
           "comp_type": "C",
           "id": 2,
           "nodes": [
             2,
-            10
+            22
           ],
-          "value": "470nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "75"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "R",
-          "id": 5,
-          "nodes": [
-            0,
-            2
-          ],
-          "value": "6.2k"
-        },
-        {
-          "comp_type": "C",
-          "id": 3,
-          "nodes": [
-            10,
-            3
-          ],
-          "value": "39pF"
+          "value": "2.2nF"
         }
       ],
       "vcc": 9.0,
@@ -3391,13 +1468,14 @@
     },
     {
       "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
         0,
-        21
+        2,
+        4,
+        10,
+        1,
+        21,
+        3,
+        22
       ],
       "components": [
         {
@@ -3405,9 +1483,9 @@
           "id": 1,
           "nodes": [
             1,
-            10
+            21
           ],
-          "value": "7.5k"
+          "value": "10k"
         },
         {
           "comp_type": "X",
@@ -3422,67 +1500,40 @@
           "value": "TL072"
         },
         {
-          "comp_type": "R",
-          "id": 2,
-          "nodes": [
-            2,
-            4
-          ],
-          "value": "5.1k"
-        },
-        {
           "comp_type": "C",
           "id": 1,
           "nodes": [
-            10,
-            4
+            0,
+            10
           ],
-          "value": "270nF"
+          "value": "820pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            21,
+            22
+          ],
+          "value": "9.1k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            22,
+            10
+          ],
+          "value": "8.2k"
         },
         {
           "comp_type": "C",
           "id": 2,
           "nodes": [
             2,
-            10
+            22
           ],
-          "value": "470nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "75"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "R",
-          "id": 5,
-          "nodes": [
-            0,
-            2
-          ],
-          "value": "6.8k"
-        },
-        {
-          "comp_type": "C",
-          "id": 3,
-          "nodes": [
-            10,
-            3
-          ],
-          "value": "39pF"
+          "value": "2.2nF"
         }
       ],
       "vcc": 9.0,
@@ -3490,13 +1541,14 @@
     },
     {
       "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
         0,
-        21
+        2,
+        4,
+        10,
+        1,
+        21,
+        3,
+        22
       ],
       "components": [
         {
@@ -3504,7 +1556,226 @@
           "id": 1,
           "nodes": [
             1,
+            21
+          ],
+          "value": "10k"
+        },
+        {
+          "comp_type": "X",
+          "id": 1,
+          "nodes": [
+            10,
+            2,
+            3,
+            4,
+            2
+          ],
+          "value": "TL072"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            0,
             10
+          ],
+          "value": "820pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            21,
+            22
+          ],
+          "value": "8.2k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            22,
+            10
+          ],
+          "value": "8.2k"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            22
+          ],
+          "value": "1.8nF"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        0,
+        2,
+        4,
+        10,
+        1,
+        21,
+        3,
+        22
+      ],
+      "components": [
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            1,
+            21
+          ],
+          "value": "10k"
+        },
+        {
+          "comp_type": "X",
+          "id": 1,
+          "nodes": [
+            10,
+            2,
+            3,
+            4,
+            2
+          ],
+          "value": "TL072"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            0,
+            10
+          ],
+          "value": "820pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            21,
+            22
+          ],
+          "value": "8.2k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            22,
+            10
+          ],
+          "value": "9.1k"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            22
+          ],
+          "value": "1.8nF"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        0,
+        2,
+        4,
+        10,
+        1,
+        21,
+        3,
+        22
+      ],
+      "components": [
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            1,
+            21
+          ],
+          "value": "10k"
+        },
+        {
+          "comp_type": "X",
+          "id": 1,
+          "nodes": [
+            10,
+            2,
+            3,
+            4,
+            2
+          ],
+          "value": "TL072"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            0,
+            10
+          ],
+          "value": "820pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            21,
+            22
+          ],
+          "value": "10k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            22,
+            10
+          ],
+          "value": "8.2k"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            22
+          ],
+          "value": "2.2nF"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        0,
+        2,
+        4,
+        10,
+        1,
+        21,
+        3,
+        22
+      ],
+      "components": [
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            1,
+            21
           ],
           "value": "9.1k"
         },
@@ -3524,73 +1795,37 @@
           "comp_type": "C",
           "id": 1,
           "nodes": [
-            10,
-            4
+            0,
+            10
           ],
-          "value": "220nF"
+          "value": "820pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            21,
+            22
+          ],
+          "value": "9.1k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            22,
+            10
+          ],
+          "value": "9.1k"
         },
         {
           "comp_type": "C",
           "id": 2,
           "nodes": [
             2,
-            10
+            22
           ],
-          "value": "390nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "82"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "75"
-        },
-        {
-          "comp_type": "C",
-          "id": 3,
-          "nodes": [
-            4,
-            1
-          ],
-          "value": "5.6nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 5,
-          "nodes": [
-            0,
-            2
-          ],
-          "value": "240"
-        },
-        {
-          "comp_type": "C",
-          "id": 4,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "100nF"
-        },
-        {
-          "comp_type": "C",
-          "id": 5,
-          "nodes": [
-            1,
-            3
-          ],
-          "value": "220pF"
+          "value": "2.2nF"
         }
       ],
       "vcc": 9.0,
@@ -3598,185 +1833,24 @@
     },
     {
       "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
         0,
-        21
+        2,
+        4,
+        10,
+        1,
+        21,
+        3,
+        22
       ],
       "components": [
         {
           "comp_type": "R",
           "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "8.2k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "R",
-          "id": 2,
-          "nodes": [
-            0,
-            4
-          ],
-          "value": "5.1k"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "270nF"
-        },
-        {
-          "comp_type": "C",
-          "id": 2,
-          "nodes": [
-            2,
-            4
-          ],
-          "value": "470nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
           "nodes": [
             1,
             21
           ],
-          "value": "75"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "82"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "8.2k"
-        },
-        {
-          "comp_type": "X",
-          "id": 1,
-          "nodes": [
-            10,
-            2,
-            3,
-            4,
-            2
-          ],
-          "value": "TL072"
-        },
-        {
-          "comp_type": "R",
-          "id": 2,
-          "nodes": [
-            0,
-            4
-          ],
-          "value": "5.1k"
-        },
-        {
-          "comp_type": "C",
-          "id": 1,
-          "nodes": [
-            10,
-            4
-          ],
-          "value": "270nF"
-        },
-        {
-          "comp_type": "C",
-          "id": 2,
-          "nodes": [
-            2,
-            10
-          ],
-          "value": "470nF"
-        },
-        {
-          "comp_type": "R",
-          "id": 3,
-          "nodes": [
-            1,
-            21
-          ],
-          "value": "75"
-        },
-        {
-          "comp_type": "R",
-          "id": 4,
-          "nodes": [
-            21,
-            2
-          ],
-          "value": "82"
-        }
-      ],
-      "vcc": 9.0,
-      "vee": -9.0
-    },
-    {
-      "nodes": [
-        3,
-        4,
-        1,
-        2,
-        10,
-        0,
-        21
-      ],
-      "components": [
-        {
-          "comp_type": "R",
-          "id": 1,
-          "nodes": [
-            1,
-            10
-          ],
-          "value": "8.2k"
+          "value": "10k"
         },
         {
           "comp_type": "X",
@@ -3794,46 +1868,913 @@
           "comp_type": "C",
           "id": 1,
           "nodes": [
-            10,
-            4
+            0,
+            10
           ],
-          "value": "270nF"
+          "value": "820pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            21,
+            22
+          ],
+          "value": "9.1k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            22,
+            10
+          ],
+          "value": "8.2k"
         },
         {
           "comp_type": "C",
           "id": 2,
           "nodes": [
             2,
+            22
+          ],
+          "value": "1.8nF"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        0,
+        2,
+        4,
+        10,
+        1,
+        21,
+        3,
+        22
+      ],
+      "components": [
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            1,
+            21
+          ],
+          "value": "10k"
+        },
+        {
+          "comp_type": "X",
+          "id": 1,
+          "nodes": [
+            10,
+            2,
+            3,
+            4,
+            2
+          ],
+          "value": "TL072"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            0,
             10
           ],
-          "value": "470nF"
+          "value": "820pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            21,
+            22
+          ],
+          "value": "8.2k"
         },
         {
           "comp_type": "R",
           "id": 3,
           "nodes": [
+            22,
+            10
+          ],
+          "value": "10k"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            22
+          ],
+          "value": "1.8nF"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        0,
+        2,
+        4,
+        10,
+        1,
+        21,
+        3,
+        22
+      ],
+      "components": [
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
             1,
             21
           ],
-          "value": "75"
+          "value": "11k"
         },
         {
-          "comp_type": "R",
-          "id": 4,
+          "comp_type": "X",
+          "id": 1,
           "nodes": [
-            21,
+            10,
+            2,
+            3,
+            4,
             2
           ],
-          "value": "82"
+          "value": "TL072"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            0,
+            10
+          ],
+          "value": "820pF"
         },
         {
           "comp_type": "R",
-          "id": 5,
+          "id": 2,
+          "nodes": [
+            21,
+            22
+          ],
+          "value": "8.2k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            22,
+            10
+          ],
+          "value": "8.2k"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
           "nodes": [
             2,
-            4
+            22
           ],
-          "value": "110k"
+          "value": "1.8nF"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        0,
+        2,
+        4,
+        10,
+        1,
+        21,
+        3,
+        22
+      ],
+      "components": [
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            1,
+            21
+          ],
+          "value": "10k"
+        },
+        {
+          "comp_type": "X",
+          "id": 1,
+          "nodes": [
+            10,
+            2,
+            3,
+            4,
+            2
+          ],
+          "value": "TL072"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            0,
+            10
+          ],
+          "value": "820pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            21,
+            22
+          ],
+          "value": "9.1k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            22,
+            10
+          ],
+          "value": "9.1k"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            22
+          ],
+          "value": "2.2nF"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        0,
+        2,
+        4,
+        10,
+        1,
+        21,
+        3,
+        22
+      ],
+      "components": [
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            1,
+            21
+          ],
+          "value": "10k"
+        },
+        {
+          "comp_type": "X",
+          "id": 1,
+          "nodes": [
+            10,
+            2,
+            3,
+            4,
+            2
+          ],
+          "value": "TL072"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            0,
+            10
+          ],
+          "value": "820pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            21,
+            22
+          ],
+          "value": "9.1k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            22,
+            10
+          ],
+          "value": "9.1k"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            22
+          ],
+          "value": "1.8nF"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        0,
+        2,
+        4,
+        10,
+        1,
+        21,
+        3,
+        22
+      ],
+      "components": [
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            1,
+            21
+          ],
+          "value": "10k"
+        },
+        {
+          "comp_type": "X",
+          "id": 1,
+          "nodes": [
+            10,
+            2,
+            3,
+            4,
+            2
+          ],
+          "value": "TL072"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            0,
+            10
+          ],
+          "value": "820pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            21,
+            22
+          ],
+          "value": "10k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            22,
+            10
+          ],
+          "value": "9.1k"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            22
+          ],
+          "value": "2.2nF"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        0,
+        2,
+        4,
+        10,
+        1,
+        21,
+        3,
+        22
+      ],
+      "components": [
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            1,
+            21
+          ],
+          "value": "11k"
+        },
+        {
+          "comp_type": "X",
+          "id": 1,
+          "nodes": [
+            10,
+            2,
+            3,
+            4,
+            2
+          ],
+          "value": "TL072"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            0,
+            10
+          ],
+          "value": "820pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            21,
+            22
+          ],
+          "value": "8.2k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            22,
+            10
+          ],
+          "value": "9.1k"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            22
+          ],
+          "value": "1.8nF"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        0,
+        2,
+        4,
+        10,
+        1,
+        21,
+        3,
+        22
+      ],
+      "components": [
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            1,
+            21
+          ],
+          "value": "10k"
+        },
+        {
+          "comp_type": "X",
+          "id": 1,
+          "nodes": [
+            10,
+            2,
+            3,
+            4,
+            2
+          ],
+          "value": "TL072"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            0,
+            10
+          ],
+          "value": "820pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            21,
+            22
+          ],
+          "value": "11k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            22,
+            10
+          ],
+          "value": "8.2k"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            22
+          ],
+          "value": "2.2nF"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        0,
+        2,
+        4,
+        10,
+        1,
+        21,
+        3,
+        22
+      ],
+      "components": [
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            1,
+            21
+          ],
+          "value": "10k"
+        },
+        {
+          "comp_type": "X",
+          "id": 1,
+          "nodes": [
+            10,
+            2,
+            3,
+            4,
+            2
+          ],
+          "value": "TL072"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            0,
+            10
+          ],
+          "value": "680pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            21,
+            22
+          ],
+          "value": "11k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            22,
+            10
+          ],
+          "value": "10k"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            22
+          ],
+          "value": "2.2nF"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        0,
+        2,
+        4,
+        10,
+        1,
+        21,
+        3,
+        22
+      ],
+      "components": [
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            1,
+            21
+          ],
+          "value": "11k"
+        },
+        {
+          "comp_type": "X",
+          "id": 1,
+          "nodes": [
+            10,
+            2,
+            3,
+            4,
+            2
+          ],
+          "value": "TL072"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            0,
+            10
+          ],
+          "value": "680pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            21,
+            22
+          ],
+          "value": "10k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            22,
+            10
+          ],
+          "value": "10k"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            22
+          ],
+          "value": "2.2nF"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        0,
+        2,
+        4,
+        10,
+        1,
+        21,
+        3,
+        22
+      ],
+      "components": [
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            1,
+            21
+          ],
+          "value": "10k"
+        },
+        {
+          "comp_type": "X",
+          "id": 1,
+          "nodes": [
+            10,
+            2,
+            3,
+            4,
+            2
+          ],
+          "value": "TL072"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            0,
+            10
+          ],
+          "value": "820pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            21,
+            22
+          ],
+          "value": "9.1k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            22,
+            10
+          ],
+          "value": "10k"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            22
+          ],
+          "value": "2.2nF"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        0,
+        2,
+        4,
+        10,
+        1,
+        21,
+        3,
+        22
+      ],
+      "components": [
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            1,
+            21
+          ],
+          "value": "12k"
+        },
+        {
+          "comp_type": "X",
+          "id": 1,
+          "nodes": [
+            10,
+            2,
+            3,
+            4,
+            2
+          ],
+          "value": "TL072"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            0,
+            10
+          ],
+          "value": "820pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            21,
+            22
+          ],
+          "value": "8.2k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            22,
+            10
+          ],
+          "value": "8.2k"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            22
+          ],
+          "value": "1.8nF"
+        }
+      ],
+      "vcc": 9.0,
+      "vee": -9.0
+    },
+    {
+      "nodes": [
+        0,
+        2,
+        4,
+        10,
+        1,
+        21,
+        3,
+        22
+      ],
+      "components": [
+        {
+          "comp_type": "R",
+          "id": 1,
+          "nodes": [
+            1,
+            21
+          ],
+          "value": "10k"
+        },
+        {
+          "comp_type": "X",
+          "id": 1,
+          "nodes": [
+            10,
+            2,
+            3,
+            4,
+            2
+          ],
+          "value": "TL072"
+        },
+        {
+          "comp_type": "C",
+          "id": 1,
+          "nodes": [
+            0,
+            10
+          ],
+          "value": "680pF"
+        },
+        {
+          "comp_type": "R",
+          "id": 2,
+          "nodes": [
+            21,
+            22
+          ],
+          "value": "10k"
+        },
+        {
+          "comp_type": "R",
+          "id": 3,
+          "nodes": [
+            22,
+            10
+          ],
+          "value": "10k"
+        },
+        {
+          "comp_type": "C",
+          "id": 2,
+          "nodes": [
+            2,
+            22
+          ],
+          "value": "2.2nF"
         }
       ],
       "vcc": 9.0,

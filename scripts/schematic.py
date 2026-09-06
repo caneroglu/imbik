@@ -36,7 +36,9 @@ try:
     import schemdraw
     import schemdraw.elements as elm
 except ImportError:
-    print("Error: schemdraw is required. Run with: uv run --with schemdraw python scripts/schematic.py ...")
+    print("Error: 'schemdraw' library is required to render schematics.")
+    print("  Option 1 (recommended): Run via uv: uv run --with schemdraw python scripts/schematic.py ...")
+    print("  Option 2: Install via pip: pip install schemdraw")
     sys.exit(1)
 
 
