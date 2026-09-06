@@ -77,6 +77,13 @@ fn get_available_nodes(circuit: &Circuit) -> Vec<usize> {
 
 /// Operator 1: Change component value to adjacent E24 / E12 step or toggle BJT model
 pub fn mutate_change_value(circuit: &mut Circuit) -> bool {
+    mutate_change_value_with_models(circuit, None)
+}
+
+pub fn mutate_change_value_with_models(
+    circuit: &mut Circuit,
+    models: Option<&crate::preset::PresetModels>,
+) -> bool {
     let indices: Vec<usize> = circuit
         .components
         .iter()
@@ -117,11 +124,15 @@ pub fn mutate_change_value(circuit: &mut Circuit) -> bool {
             true
         }
         ComponentType::Q => {
-            let is_npn = circuit.components[idx].value.to_uppercase().contains("3904");
+            let npn_name = models.map(|m| m.bjt_npn.as_str()).unwrap_or("2N3904");
+            let pnp_name = models.map(|m| m.bjt_pnp.as_str()).unwrap_or("2N3906");
+            let is_npn = circuit.components[idx].value == npn_name
+                || circuit.components[idx].value.to_uppercase().contains("3904")
+                || circuit.components[idx].value.to_uppercase().contains("547");
             circuit.components[idx].value = if is_npn {
-                "2N3906".to_string()
+                pnp_name.to_string()
             } else {
-                "2N3904".to_string()
+                npn_name.to_string()
             };
 
             // When toggling NPN <-> PNP:
@@ -183,6 +194,13 @@ fn pick_two_nodes(nodes: &[usize]) -> Option<(usize, usize)> {
 
 /// Operator 2: Add a new component (R, C, D, Q, or X)
 pub fn mutate_add_component(circuit: &mut Circuit) -> bool {
+    mutate_add_component_with_models(circuit, None)
+}
+
+pub fn mutate_add_component_with_models(
+    circuit: &mut Circuit,
+    models: Option<&crate::preset::PresetModels>,
+) -> bool {
     let nodes = get_available_nodes(circuit);
     if nodes.len() < 2 {
         return false;
@@ -213,10 +231,11 @@ pub fn mutate_add_component(circuit: &mut Circuit) -> bool {
         }
     } else if roll < 75 {
         // Add Diode (10% in discrete, 5% if opamp)
+        let diode_model = models.map(|m| m.diode.as_str()).unwrap_or("1N4148");
         if (!has_opamp || fastrand::bool())
             && let Some((u, v)) = pick_two_nodes(&nodes) {
                 let id = next_id(circuit, ComponentType::D);
-                if let Ok(comp) = Component::new('D', id, vec![u, v], "1N4148") {
+                if let Ok(comp) = Component::new('D', id, vec![u, v], diode_model) {
                     circuit.add_component(comp);
                     return true;
                 }
@@ -226,7 +245,9 @@ pub fn mutate_add_component(circuit: &mut Circuit) -> bool {
         let bjt_count = circuit.components.iter().filter(|c| c.comp_type == ComponentType::Q).count();
         if bjt_count < 4 {
             let is_npn = fastrand::bool();
-            let model = if is_npn { "2N3904" } else { "2N3906" };
+            let npn_model = models.map(|m| m.bjt_npn.as_str()).unwrap_or("2N3904");
+            let pnp_model = models.map(|m| m.bjt_pnp.as_str()).unwrap_or("2N3906");
+            let model = if is_npn { npn_model } else { pnp_model };
             let id = next_id(circuit, ComponentType::Q);
 
             let base = nodes[fastrand::usize(0..nodes.len())];
@@ -256,7 +277,7 @@ pub fn mutate_add_component(circuit: &mut Circuit) -> bool {
                 }
         }
     } else {
-        // Add Op-Amp TL072 (only if no opamp exists or max 1)
+        // Add Op-Amp (only if no opamp exists or max 1)
         let opamp_count = circuit
             .components
             .iter()
@@ -268,8 +289,9 @@ pub fn mutate_add_component(circuit: &mut Circuit) -> bool {
             let out_node = next_node_id(circuit);
             let inv_node = next_node_id(circuit);
 
+            let opamp_model = models.map(|m| m.opamp.as_str()).unwrap_or("TL072");
             let id = next_id(circuit, ComponentType::X);
-            if let Ok(comp) = Component::new('X', id, vec![non_inv, inv_node, NODE_VCC, NODE_VEE, out_node], "TL072") {
+            if let Ok(comp) = Component::new('X', id, vec![non_inv, inv_node, NODE_VCC, NODE_VEE, out_node], opamp_model) {
                 circuit.add_component(comp);
 
                 // Stabilized Birth: Add negative feedback resistor from out_node to inv_node
@@ -599,6 +621,13 @@ pub fn mutate_split_resistor(circuit: &mut Circuit) -> bool {
 
 /// Operator 8: Add Bootstrap Bridge (Compound structural mutation for high-Z discrete buffers)
 pub fn mutate_add_bootstrap(circuit: &mut Circuit) -> bool {
+    mutate_add_bootstrap_with_models(circuit, None)
+}
+
+pub fn mutate_add_bootstrap_with_models(
+    circuit: &mut Circuit,
+    models: Option<&crate::preset::PresetModels>,
+) -> bool {
     let bjt_indices: Vec<usize> = circuit
         .components
         .iter()
@@ -608,7 +637,7 @@ pub fn mutate_add_bootstrap(circuit: &mut Circuit) -> bool {
         .collect();
 
     if bjt_indices.is_empty() {
-        return mutate_add_component(circuit);
+        return mutate_add_component_with_models(circuit, models);
     }
 
     let bjt_idx = bjt_indices[fastrand::usize(0..bjt_indices.len())];
@@ -709,6 +738,14 @@ impl MutationStats {
 
 /// Core mutation engine with telemetry tracking and bloat control
 pub fn mutate_with_stats(circuit: &Circuit, stats: &mut MutationStats) -> Circuit {
+    mutate_with_stats_and_models(circuit, stats, None)
+}
+
+pub fn mutate_with_stats_and_models(
+    circuit: &Circuit,
+    stats: &mut MutationStats,
+    models: Option<&crate::preset::PresetModels>,
+) -> Circuit {
     stats.total_calls += 1;
     let comp_count = circuit.components.len();
 
@@ -756,14 +793,14 @@ pub fn mutate_with_stats(circuit: &Circuit, stats: &mut MutationStats) -> Circui
 
         stats.op_attempts[op as usize] += 1;
         let mutated = match op {
-            0 => mutate_change_value(&mut candidate),
-            1 => mutate_add_component(&mut candidate),
+            0 => mutate_change_value_with_models(&mut candidate, models),
+            1 => mutate_add_component_with_models(&mut candidate, models),
             2 => mutate_remove_component(&mut candidate),
             3 => mutate_move_terminal(&mut candidate),
             4 => mutate_add_feedback(&mut candidate),
             5 => mutate_cross_coupling(&mut candidate),
             6 => mutate_split_resistor(&mut candidate),
-            _ => mutate_add_bootstrap(&mut candidate),
+            _ => mutate_add_bootstrap_with_models(&mut candidate, models),
         };
 
         if mutated {
@@ -779,10 +816,15 @@ pub fn mutate_with_stats(circuit: &Circuit, stats: &mut MutationStats) -> Circui
     circuit.clone()
 }
 
+/// Mutate circuit with specific preset component models
+pub fn mutate_with_models(circuit: &Circuit, models: Option<&crate::preset::PresetModels>) -> Circuit {
+    let mut dummy_stats = MutationStats::new();
+    mutate_with_stats_and_models(circuit, &mut dummy_stats, models)
+}
+
 /// Standard entry point
 pub fn mutate(circuit: &Circuit) -> Circuit {
-    let mut dummy_stats = MutationStats::new();
-    mutate_with_stats(circuit, &mut dummy_stats)
+    mutate_with_models(circuit, None)
 }
 
 /// Seed a population of 100% discrete components (BJTs, Resistors, Capacitors, Diodes - NO Op-Amps)

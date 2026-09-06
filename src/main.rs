@@ -158,6 +158,14 @@ enum PresetCommands {
         /// Preset name (e.g. 'buffer', 'low_noise_preamp') or path to TOML
         name: String,
     },
+    /// Validate a preset TOML structure and verify component models with live SPICE smoke tests
+    Check {
+        /// Preset name (e.g. 'buffer', 'sallen_key_10k') or path to TOML
+        name: String,
+        /// Skip live SPICE benchmark tests (schema and catalog checks only)
+        #[arg(long)]
+        no_spice: bool,
+    },
     /// Print documented TOML configuration template for custom missions & probe targets
     Template,
 }
@@ -573,6 +581,11 @@ fn main() {
                 println!("- Feasibility Max DC:      {:.2} V", p.feasibility_max_dc);
                 println!("- Feasibility Rail Margin: {:.2} V", p.feasibility_rail_margin);
                 println!("- Allow Op-Amps:           {}", p.allow_opamps);
+                println!("- Component Models:");
+                println!("    • Op-Amp:  {} (Default/Configured)", p.models.opamp);
+                println!("    • BJT NPN: {}", p.models.bjt_npn);
+                println!("    • BJT PNP: {}", p.models.bjt_pnp);
+                println!("    • Diode:   {}", p.models.diode);
                 println!("\nTarget Fitness Probes (Total: {}):", p.probes.len());
                 for (i, pr) in p.probes.iter().enumerate() {
                     let req_str = if pr.is_required { " [REQUIRED]" } else { "" };
@@ -593,6 +606,23 @@ fn main() {
                     );
                 }
                 println!("=================================================================================\n");
+            }
+            PresetCommands::Check { name, no_spice } => {
+                let p = match preset::Preset::load_or_builtin(&name) {
+                    Ok(pr) => pr,
+                    Err(e) => {
+                        eprintln!("Error loading preset '{}': {}", name, e);
+                        std::process::exit(1);
+                    }
+                };
+
+                let catalog = parts::PartCatalog::load_with_overrides();
+                let report = p.validate_and_check(&catalog, !no_spice);
+                println!("{}", report.format_diagnostic());
+
+                if !report.is_valid {
+                    std::process::exit(1);
+                }
             }
             PresetCommands::Template => {
                 let toml_str = preset::Preset::template_toml();
@@ -801,7 +831,41 @@ fn main() {
 
             if let Some(preset_name) = preset {
                 match preset::Preset::load_or_builtin(&preset_name) {
-                    Ok(p) => config.preset = Some(p),
+                    Ok(p) => {
+                        let catalog = parts::PartCatalog::load_with_overrides();
+                        let report = p.validate_and_check(&catalog, true);
+                        if !report.is_valid {
+                            eprintln!("\n❌ PRESET / MODEL VALIDATION FAILED: Cannot start evolution.");
+                            for issue in &report.issues {
+                                if issue.severity == preset::ValidationSeverity::Error {
+                                    eprintln!("  • [ERROR] {}: {}", issue.component, issue.message);
+                                    if let Some(ref sug) = issue.suggestion {
+                                        eprintln!("    ↳ Suggestion: {}", sug);
+                                    }
+                                }
+                            }
+                            println!();
+                            std::process::exit(1);
+                        }
+
+                        let warnings: Vec<_> = report
+                            .issues
+                            .iter()
+                            .filter(|i| i.severity == preset::ValidationSeverity::Warning)
+                            .collect();
+                        if !warnings.is_empty() {
+                            println!("\n⚠️ Preset Validation Warnings:");
+                            for w in warnings {
+                                println!("  • [WARN] {}: {}", w.component, w.message);
+                                if let Some(ref sug) = w.suggestion {
+                                    println!("    ↳ Suggestion: {}", sug);
+                                }
+                            }
+                            println!();
+                        }
+
+                        config.preset = Some(p);
+                    }
                     Err(err) => {
                         eprintln!("Error loading preset: {}", err);
                         std::process::exit(1);

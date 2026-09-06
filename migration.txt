@@ -1,0 +1,12 @@
+ **Al:** `kiddo`, `petgraph` (izomorfizm için), `comfy-table`+`owo-colors`, `clap` ✓, `thiserror`+`anyhow`, `rand`+`rand_chacha`+`rand_distr`, `csv`, `rust-embed`, `garde`+`schemars`, `insta`+`proptest`, `indicatif`.
+
+**Alma:** `rustfft` (yavaşlatır), `cassowary` (ölü + gereksiz), `libngspice` FFI (şimdilik — önce raw format + embed + sıcak süreç).
+
+**İsteğe bağlı:** `ratatui` (özellik olarak istiyorsan, sadeleştirme olarak değil).
+
+Kaynaklar:
+- [ngspice — Parallel simulation (worker başına ayrı kütüphane kopyası)](https://ngspice.sourceforge.io/parallel.html)
+- [PySpice NgSpice Shared — global değişken kısıtı](https://pyspice.fabrice-salvaire.fr/releases/v1.6/api/PySpice/Spice/NgSpice/Shared.html)
+- [cassowary — crates.io (0.3.0, Eylül 2017)](https://crates.io/crates/cassowary)
+- [ngspice-sys — lib.rs (minimal maintenance)](https://lib.rs/crates/ngspice-sys)
+- [kiddo — crates.io](https://crates.io/crates/kiddo)

@@ -1,0 +1,40 @@
+name = "mcp6002_filter"
+description = "Active Audio Filter synthesized using imported Microchip MCP6002 Rail-to-Rail Op-Amp"
+feasibility_max_dc = 0.50
+feasibility_rail_margin = 0.20
+allow_opamps = true
+
+# Model Selection: Uses custom imported MCP6002 rail-to-rail op-amp
+[models]
+opamp = "MCP6002"
+bjt_npn = "2N3904"
+bjt_pnp = "2N3906"
+diode = "1N4148"
+
+[[probes]]
+name = "Passband@1kHz"
+probe_type = "Gain"
+kind = "Closeness"
+want = 1.0
+soft = 0.80
+weight = 3.0
+require = true
+
+[probes.condition]
+freq = 1000.0
+vin = 0.1
+r_load = 10000.0
+
+[[probes]]
+name = "Cutoff@10kHz"
+probe_type = "Gain"
+kind = "Closeness"
+want = 0.707
+soft = 0.20
+weight = 3.5
+require = true
+
+[probes.condition]
+freq = 10000.0
+vin = 0.1
+r_load = 10000.0

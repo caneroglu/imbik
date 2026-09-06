@@ -106,6 +106,12 @@ impl EvolutionEngine {
         }
     }
 
+    /// Mutate circuit respecting configured preset component models
+    pub fn mutate_circuit(&self, circuit: &Circuit) -> Circuit {
+        let models = self.config.preset.as_ref().map(|p| &p.models);
+        crate::mutate::mutate_with_models(circuit, models)
+    }
+
     /// Seed the population with templates appropriate for novelty search or preset mission
     pub fn seed_standard_population(&mut self) {
         self.population.clear();
@@ -117,17 +123,19 @@ impl EvolutionEngine {
                 return;
             }
 
+            let opamp_model = &preset.models.opamp;
+
             // Op-Amp Preset Mission Seeding: Op-Amp follower seed + buffered follower with input resistor + 2-stage ladder follower
             let mut op_seed = Circuit::new();
             op_seed.add_component(
-                Component::new('X', 1, vec![NODE_IN, NODE_OUT, NODE_VCC, NODE_VEE, NODE_OUT], "TL072").unwrap(),
+                Component::new('X', 1, vec![NODE_IN, NODE_OUT, NODE_VCC, NODE_VEE, NODE_OUT], opamp_model).unwrap(),
             );
             let _ = op_seed.validate();
 
             let mut op_res_seed = Circuit::new();
             op_res_seed.add_component(Component::new('R', 1, vec![NODE_IN, 10], "10k").unwrap());
             op_res_seed.add_component(
-                Component::new('X', 1, vec![10, NODE_OUT, NODE_VCC, NODE_VEE, NODE_OUT], "TL072").unwrap(),
+                Component::new('X', 1, vec![10, NODE_OUT, NODE_VCC, NODE_VEE, NODE_OUT], opamp_model).unwrap(),
             );
             let _ = op_res_seed.validate();
 
@@ -135,7 +143,7 @@ impl EvolutionEngine {
             op_res2_seed.add_component(Component::new('R', 1, vec![NODE_IN, 10], "10k").unwrap());
             op_res2_seed.add_component(Component::new('R', 2, vec![10, 20], "10k").unwrap());
             op_res2_seed.add_component(
-                Component::new('X', 1, vec![20, NODE_OUT, NODE_VCC, NODE_VEE, NODE_OUT], "TL072").unwrap(),
+                Component::new('X', 1, vec![20, NODE_OUT, NODE_VCC, NODE_VEE, NODE_OUT], opamp_model).unwrap(),
             );
             let _ = op_res2_seed.validate();
 
@@ -146,7 +154,7 @@ impl EvolutionEngine {
             let seeds = [&op_seed, &op_res_seed, &op_res2_seed];
             while self.population.len() < self.config.population_size {
                 let base = seeds[self.population.len() % seeds.len()];
-                self.population.push(mutate(base));
+                self.population.push(self.mutate_circuit(base));
             }
             return;
         }
@@ -178,7 +186,7 @@ impl EvolutionEngine {
             } else {
                 dc.clone()
             };
-            let mutant = mutate(&base);
+            let mutant = self.mutate_circuit(&base);
             self.population.push(mutant);
         }
     }
@@ -188,14 +196,6 @@ impl EvolutionEngine {
         &mut self,
         running_flag: Arc<AtomicBool>,
     ) -> Result<CheckpointData, Box<dyn std::error::Error>> {
-        if self.population.is_empty() {
-            self.seed_standard_population();
-        }
-
-        fs::create_dir_all(&self.config.checkpoint_dir)?;
-
-        let timeout = Duration::from_secs(self.config.sim_timeout_secs);
-
         let seed = self.config.seed.unwrap_or_else(|| {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -204,6 +204,14 @@ impl EvolutionEngine {
             now ^ (std::process::id() as u64)
         });
         fastrand::seed(seed);
+
+        if self.population.is_empty() {
+            self.seed_standard_population();
+        }
+
+        fs::create_dir_all(&self.config.checkpoint_dir)?;
+
+        let timeout = Duration::from_secs(self.config.sim_timeout_secs);
 
         if let Some(ref preset) = self.config.preset {
             let preset_hash = preset.checksum();
@@ -565,11 +573,11 @@ impl EvolutionEngine {
         while next_pop.len() < self.config.population_size {
             if !next_pop.is_empty() {
                 let parent = &next_pop[fill_idx % next_pop.len()];
-                next_pop.push(mutate(parent));
+                next_pop.push(self.mutate_circuit(parent));
                 fill_idx += 1;
             } else if !self.population.is_empty() {
                 let parent = &self.population[fill_idx % self.population.len()];
-                next_pop.push(mutate(parent));
+                next_pop.push(self.mutate_circuit(parent));
                 fill_idx += 1;
             } else {
                 let fresh = crate::mutate::seed_discrete_population(1);
@@ -776,10 +784,10 @@ impl EvolutionEngine {
         while next_pop.len() < self.config.population_size {
             if !self.archive.entries.is_empty() {
                 let seed = &self.archive.entries[fill_idx % self.archive.entries.len()].circuit;
-                next_pop.push(mutate(seed));
+                next_pop.push(self.mutate_circuit(seed));
             } else if !self.population.is_empty() {
                 let seed = &self.population[fill_idx % self.population.len()];
-                next_pop.push(mutate(seed));
+                next_pop.push(self.mutate_circuit(seed));
             } else {
                 break;
             }
