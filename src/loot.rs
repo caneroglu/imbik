@@ -132,10 +132,10 @@ pub fn evaluate_rarity(nn_dist: f64, mc_dev_db: Option<f64>, desc: &BehaviorDesc
     // 2. Functionality Checks:
     let has_filter = desc[0] > 0.5;
     let fc_hz = if has_filter { 10f64.powf(desc[1] * 5.0) } else { 0.0 };
-    let audio_filter = has_filter && ((fc_hz >= 20.0 && fc_hz <= 20_000.0) || desc[3] > 0.20);
+    let audio_filter = has_filter && ((20.0..=20_000.0).contains(&fc_hz) || desc[3] > 0.20);
 
     let has_harmonics = (desc[5] > 0.03) || (desc[6] > 0.03) || (desc[7] > 0.03) || (desc[8] > 0.15);
-    let audio_osc = has_osc && (f_osc_hz >= 20.0 && f_osc_hz <= 20_000.0);
+    let audio_osc = has_osc && (20.0..=20_000.0).contains(&f_osc_hz);
 
     let is_functional = (audio_filter || has_harmonics || audio_osc) && !is_ultrasonic_parasite;
 
@@ -164,16 +164,14 @@ pub fn evaluate_rarity(nn_dist: f64, mc_dev_db: Option<f64>, desc: &BehaviorDesc
 
 /// Resolve the uv executable path from environment or default PATH
 pub fn get_uv_cmd() -> String {
-    if let Ok(p) = std::env::var("UV_PATH") {
-        if !p.trim().is_empty() {
+    if let Ok(p) = std::env::var("UV_PATH")
+        && !p.trim().is_empty() {
             return p.trim().to_string();
         }
-    }
-    if let Ok(p) = std::env::var("IMBIK_UV") {
-        if !p.trim().is_empty() {
+    if let Ok(p) = std::env::var("IMBIK_UV")
+        && !p.trim().is_empty() {
             return p.trim().to_string();
         }
-    }
     "uv".to_string()
 }
 
@@ -472,15 +470,14 @@ pub fn show_circuit(checkpoint_path: &Path, circuit_id: usize) -> Result<(), Box
                     node_map.entry(comp.nodes[2]).or_default().push(format!("Q{}[Emitter] ({})", comp.id, comp.value));
                 }
             }
-            ComponentType::X => {
-                if comp.nodes.len() >= 5 {
+            ComponentType::X
+                if comp.nodes.len() >= 5 => {
                     node_map.entry(comp.nodes[0]).or_default().push(format!("X{}[IN+]", comp.id));
                     node_map.entry(comp.nodes[1]).or_default().push(format!("X{}[IN-]", comp.id));
                     node_map.entry(comp.nodes[2]).or_default().push(format!("X{}[VCC Pin 8]", comp.id));
                     node_map.entry(comp.nodes[3]).or_default().push(format!("X{}[VEE Pin 4]", comp.id));
                     node_map.entry(comp.nodes[4]).or_default().push(format!("X{}[OUT Pin 1]", comp.id));
                 }
-            }
             _ => {}
         }
     }
@@ -598,12 +595,11 @@ pub fn render_schematic_svg(
         }
         cmd.args(["scripts/schematic.py", cp_str, &id_str, out_str]);
 
-        if let Ok(st) = cmd.status() {
-            if st.success() && target_svg.exists() {
+        if let Ok(st) = cmd.status()
+            && st.success() && target_svg.exists() {
                 log::debug!("Schematic rendering succeeded via '{}'", py_cmd);
                 return Ok(());
             }
-        }
     }
 
     Err(format!(

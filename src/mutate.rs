@@ -213,15 +213,14 @@ pub fn mutate_add_component(circuit: &mut Circuit) -> bool {
         }
     } else if roll < 75 {
         // Add Diode (10% in discrete, 5% if opamp)
-        if !has_opamp || fastrand::bool() {
-            if let Some((u, v)) = pick_two_nodes(&nodes) {
+        if (!has_opamp || fastrand::bool())
+            && let Some((u, v)) = pick_two_nodes(&nodes) {
                 let id = next_id(circuit, ComponentType::D);
                 if let Ok(comp) = Component::new('D', id, vec![u, v], "1N4148") {
                     circuit.add_component(comp);
                     return true;
                 }
             }
-        }
     } else if !has_opamp {
         // Add BJT Transistor (discrete circuits only)
         let bjt_count = circuit.components.iter().filter(|c| c.comp_type == ComponentType::Q).count();
@@ -242,8 +241,8 @@ pub fn mutate_add_component(circuit: &mut Circuit) -> bool {
                 if fastrand::u8(0..10) < 5 { NODE_OUT } else if fastrand::bool() { NODE_VCC } else { next_node_id(circuit) }
             };
 
-            if c != base && base != e && c != e {
-                if let Ok(comp) = Component::new('Q', id, vec![c, base, e], model) {
+            if c != base && base != e && c != e
+                && let Ok(comp) = Component::new('Q', id, vec![c, base, e], model) {
                     circuit.add_component(comp);
 
                     // Add an emitter pull resistor to avoid floating emitter
@@ -255,7 +254,6 @@ pub fn mutate_add_component(circuit: &mut Circuit) -> bool {
                     }
                     return true;
                 }
-            }
         }
     } else {
         // Add Op-Amp TL072 (only if no opamp exists or max 1)

@@ -148,16 +148,14 @@ impl From<std::io::Error> for SpiceError {
 
 /// Resolve the ngspice executable path from environment or default PATH
 pub fn get_ngspice_cmd() -> String {
-    if let Ok(p) = std::env::var("NGSPICE_PATH") {
-        if !p.trim().is_empty() {
+    if let Ok(p) = std::env::var("NGSPICE_PATH")
+        && !p.trim().is_empty() {
             return p.trim().to_string();
         }
-    }
-    if let Ok(p) = std::env::var("IMBIK_NGSPICE") {
-        if !p.trim().is_empty() {
+    if let Ok(p) = std::env::var("IMBIK_NGSPICE")
+        && !p.trim().is_empty() {
             return p.trim().to_string();
         }
-    }
     #[cfg(windows)]
     {
         for path in &[
@@ -210,18 +208,16 @@ pub fn run_simulation(netlist: &str, timeout: Duration) -> Result<SimulationResu
 
     // Copy any models from ./models if directory exists
     let models_dir = Path::new("models");
-    if models_dir.exists() && models_dir.is_dir() {
-        if let Ok(entries) = fs::read_dir(models_dir) {
+    if models_dir.exists() && models_dir.is_dir()
+        && let Ok(entries) = fs::read_dir(models_dir) {
             for entry in entries.flatten() {
                 let file_path = entry.path();
-                if file_path.is_file() {
-                    if let Some(file_name) = file_path.file_name() {
+                if file_path.is_file()
+                    && let Some(file_name) = file_path.file_name() {
                         let _ = fs::copy(&file_path, temp_dir.path().join(file_name));
                     }
-                }
             }
         }
-    }
 
     // Acquire concurrency permit before spawning ngspice process
     let _permit = SpicePermit::acquire();
@@ -310,18 +306,16 @@ pub fn run_simulation(netlist: &str, timeout: Duration) -> Result<SimulationResu
 
     let mut probe_ac = if probe_ac_path.exists() {
         let mut pts = parse_probe_ac_data(&probe_ac_path)?;
-        if probe_zout_path.exists() {
-            if let Ok(content) = fs::read_to_string(&probe_zout_path) {
+        if probe_zout_path.exists()
+            && let Ok(content) = fs::read_to_string(&probe_zout_path) {
                 for (idx, line) in content.lines().enumerate() {
                     let parts: Vec<&str> = line.split_whitespace().collect();
-                    if parts.len() >= 2 {
-                        if let Some(pt) = pts.get_mut(idx) {
+                    if parts.len() >= 2
+                        && let Some(pt) = pts.get_mut(idx) {
                             pt.zout = parts[1].parse::<f64>().unwrap_or(0.0);
                         }
-                    }
                 }
             }
-        }
         Some(pts)
     } else {
         None
@@ -334,24 +328,21 @@ pub fn run_simulation(netlist: &str, timeout: Duration) -> Result<SimulationResu
             let file_name = entry.file_name().to_string_lossy().to_string();
             if file_name.starts_with("probe_ac_") && file_name.ends_with(".txt") {
                 let idx_str = &file_name["probe_ac_".len()..file_name.len() - ".txt".len()];
-                if let Ok(idx) = idx_str.parse::<usize>() {
-                    if let Ok(mut pts) = parse_probe_ac_data(&entry.path()) {
+                if let Ok(idx) = idx_str.parse::<usize>()
+                    && let Ok(mut pts) = parse_probe_ac_data(&entry.path()) {
                         let zout_file = temp_dir.path().join(format!("probe_zout_{}.txt", idx));
-                        if zout_file.exists() {
-                            if let Ok(content) = fs::read_to_string(&zout_file) {
+                        if zout_file.exists()
+                            && let Ok(content) = fs::read_to_string(&zout_file) {
                                 for (l_idx, line) in content.lines().enumerate() {
                                     let parts: Vec<&str> = line.split_whitespace().collect();
-                                    if parts.len() >= 2 {
-                                        if let Some(pt) = pts.get_mut(l_idx) {
+                                    if parts.len() >= 2
+                                        && let Some(pt) = pts.get_mut(l_idx) {
                                             pt.zout = parts[1].parse::<f64>().unwrap_or(0.0);
                                         }
-                                    }
                                 }
                             }
-                        }
                         probe_ac_map.insert(idx, pts);
                     }
-                }
             }
         }
     }
@@ -372,11 +363,7 @@ pub fn run_simulation(netlist: &str, timeout: Duration) -> Result<SimulationResu
         None
     };
 
-    let noise_summary = if let Some(ref pts) = noise_response {
-        Some(parse_noise_summary(pts, &log_content, None))
-    } else {
-        None
-    };
+    let noise_summary = noise_response.as_ref().map(|pts| parse_noise_summary(pts, &log_content, None));
 
     Ok(SimulationResult {
         dc_nodes,
@@ -693,7 +680,7 @@ pub fn parse_noise_summary(
         let line_lower = line.trim().to_lowercase();
         if let Some((lhs, rhs)) = line_lower.split_once('=') {
             let var = lhs.trim();
-            let val = rhs.trim().split_whitespace().next().and_then(|v| v.parse::<f64>().ok());
+            let val = rhs.split_whitespace().next().and_then(|v| v.parse::<f64>().ok());
             if var == "inoise_total" {
                 log_inoise_total = val;
             } else if var == "onoise_total" {
@@ -709,7 +696,7 @@ pub fn parse_noise_summary(
         let mut int_sq = 0.0;
         for w in pts.windows(2) {
             let f_mid = 0.5 * (w[0].freq + w[1].freq);
-            if f_mid >= 20.0 && f_mid <= 20_000.0 {
+            if (20.0..=20_000.0).contains(&f_mid) {
                 let df = (w[1].freq - w[0].freq).abs();
                 let mean_sq = 0.5 * (w[0].inoise_density.powi(2) + w[1].inoise_density.powi(2));
                 int_sq += mean_sq * df;
@@ -724,7 +711,7 @@ pub fn parse_noise_summary(
         let mut int_sq = 0.0;
         for w in pts.windows(2) {
             let f_mid = 0.5 * (w[0].freq + w[1].freq);
-            if f_mid >= 20.0 && f_mid <= 20_000.0 {
+            if (20.0..=20_000.0).contains(&f_mid) {
                 let df = (w[1].freq - w[0].freq).abs();
                 let mean_sq = 0.5 * (w[0].onoise_density.powi(2) + w[1].onoise_density.powi(2));
                 int_sq += mean_sq * df;
@@ -800,18 +787,16 @@ pub fn run_dc_operating_point(netlist: &str, timeout: Duration) -> Result<HashMa
     fs::write(&circuit_path, netlist)?;
 
     let models_dir = Path::new("models");
-    if models_dir.exists() && models_dir.is_dir() {
-        if let Ok(entries) = fs::read_dir(models_dir) {
+    if models_dir.exists() && models_dir.is_dir()
+        && let Ok(entries) = fs::read_dir(models_dir) {
             for entry in entries.flatten() {
                 let file_path = entry.path();
-                if file_path.is_file() {
-                    if let Some(file_name) = file_path.file_name() {
+                if file_path.is_file()
+                    && let Some(file_name) = file_path.file_name() {
                         let _ = fs::copy(&file_path, temp_dir.path().join(file_name));
                     }
-                }
             }
         }
-    }
 
     // Acquire concurrency permit before spawning ngspice process
     let _permit = SpicePermit::acquire();

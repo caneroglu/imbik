@@ -12,8 +12,8 @@ pub mod spice;
 use clap::{Parser, Subcommand};
 use engine::{EvolutionConfig, EvolutionEngine};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -129,14 +129,19 @@ fn resolve_circuit_id(id_str: &str, views: &[loot::ArchiveItemView]) -> Result<u
             .max_by(|a, b| {
                 let fit_a = a.fitness.unwrap_or(a.nn_dist);
                 let fit_b = b.fitness.unwrap_or(b.nn_dist);
-                fit_a.partial_cmp(&fit_b).unwrap_or(std::cmp::Ordering::Equal)
+                fit_a
+                    .partial_cmp(&fit_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             })
             .map(|v| v.id)
             .ok_or_else(|| "Archive is empty".to_string())
     } else {
-        id_str
-            .parse::<usize>()
-            .map_err(|_| format!("Invalid circuit ID: '{}'. Expected integer or 'best'", id_str))
+        id_str.parse::<usize>().map_err(|_| {
+            format!(
+                "Invalid circuit ID: '{}'. Expected integer or 'best'",
+                id_str
+            )
+        })
     }
 }
 
@@ -248,7 +253,9 @@ fn main() {
                 }
             };
 
-            if let Err(e) = loot::export_bench_from_checkpoint(&cp_path, circuit_id, out_dir.as_deref()) {
+            if let Err(e) =
+                loot::export_bench_from_checkpoint(&cp_path, circuit_id, out_dir.as_deref())
+            {
                 eprintln!("Error exporting bench package: {}", e);
                 std::process::exit(1);
             }
@@ -289,7 +296,10 @@ fn main() {
             checkpoint,
         } => {
             if !scope_csv.exists() {
-                eprintln!("Error: Oscilloscope capture file not found: {:?}", scope_csv);
+                eprintln!(
+                    "Error: Oscilloscope capture file not found: {:?}",
+                    scope_csv
+                );
                 std::process::exit(1);
             }
 
@@ -301,8 +311,12 @@ fn main() {
             }
 
             // Find reference.csv either in bench/circuit_{id}/reference.csv or generate it
-            let candidate_ref = PathBuf::from(format!("bench/circuit_{:02}/reference.csv", circuit_id));
-            let _temp_guard = tempfile::Builder::new().prefix("imbik_ingest_bench_").tempdir().ok();
+            let candidate_ref =
+                PathBuf::from(format!("bench/circuit_{:02}/reference.csv", circuit_id));
+            let _temp_guard = tempfile::Builder::new()
+                .prefix("imbik_ingest_bench_")
+                .tempdir()
+                .ok();
             let ref_csv_path = if candidate_ref.exists() {
                 candidate_ref
             } else if let Some(ref td) = _temp_guard {
@@ -314,7 +328,10 @@ fn main() {
             };
 
             if !ref_csv_path.exists() {
-                eprintln!("Error: Reference simulation data not found at {:?}", ref_csv_path);
+                eprintln!(
+                    "Error: Reference simulation data not found at {:?}",
+                    ref_csv_path
+                );
                 std::process::exit(1);
             }
 
@@ -329,25 +346,40 @@ fn main() {
                 Ok(res) => {
                     println!("\n{}", res.details);
                     if res.is_verified {
-                        println!("\n🏆 SUCCESS: Measured oscilloscope waveforms match SPICE reality with r = {:.4}!", res.pearson_r);
-                        println!("🎉 Circuit #{} is now HARDWARE VERIFIED! Rarity upgraded to LEGENDARY!", circuit_id);
+                        println!(
+                            "\n🏆 SUCCESS: Measured oscilloscope waveforms match SPICE reality with r = {:.4}!",
+                            res.pearson_r
+                        );
+                        println!(
+                            "🎉 Circuit #{} is now HARDWARE VERIFIED! Rarity upgraded to LEGENDARY!",
+                            circuit_id
+                        );
 
                         // Update checkpoint with is_hardware_verified = true
-                        if let Ok(content) = std::fs::read_to_string(&cp_path) {
-                            if let Ok(mut cp) = serde_json::from_str::<engine::CheckpointData>(&content) {
-                                if let Some(entry) = cp.archive.entries.get_mut(circuit_id) {
+                        if let Ok(content) = std::fs::read_to_string(&cp_path)
+                            && let Ok(mut cp) =
+                                serde_json::from_str::<engine::CheckpointData>(&content)
+                                && let Some(entry) = cp.archive.entries.get_mut(circuit_id) {
                                     entry.is_hardware_verified = true;
                                     if let Ok(updated_json) = serde_json::to_string_pretty(&cp) {
                                         let _ = std::fs::write(&cp_path, updated_json);
-                                        println!("Saved updated hardware-verified status to {:?}", cp_path);
+                                        println!(
+                                            "Saved updated hardware-verified status to {:?}",
+                                            cp_path
+                                        );
                                     }
                                 }
-                            }
-                        }
                     } else {
-                        println!("\n⚠️ WARNING: Deviation between physical hardware and SPICE simulation!");
-                        println!("   Pearson r: {:.4} (need >= 0.85), NRMSE: {:.4} (need <= 0.35)", res.pearson_r, res.nrmse);
-                        println!("   Check breadboard component tolerances, rail voltages, and grounding.");
+                        println!(
+                            "\n⚠️ WARNING: Deviation between physical hardware and SPICE simulation!"
+                        );
+                        println!(
+                            "   Pearson r: {:.4} (need >= 0.85), NRMSE: {:.4} (need <= 0.35)",
+                            res.pearson_r, res.nrmse
+                        );
+                        println!(
+                            "   Check breadboard component tolerances, rail voltages, and grounding."
+                        );
                     }
                 }
                 Err(e) => {
@@ -391,7 +423,9 @@ fn main() {
             let r = running.clone();
 
             if let Err(e) = ctrlc::set_handler(move || {
-                println!("\n[Ctrl-C detected] Halting evolution gracefully after current generation...");
+                println!(
+                    "\n[Ctrl-C detected] Halting evolution gracefully after current generation..."
+                );
                 r.store(false, Ordering::SeqCst);
             }) {
                 eprintln!("Warning: Failed to set Ctrl-C handler: {}", e);
@@ -401,7 +435,10 @@ fn main() {
             match engine.run(running) {
                 Ok(checkpoint) => {
                     println!("\n============================================================");
-                    println!("  Evolution Run Finished! Archive Size: {} topologies", checkpoint.archive.len());
+                    println!(
+                        "  Evolution Run Finished! Archive Size: {} topologies",
+                        checkpoint.archive.len()
+                    );
                     println!("============================================================");
                 }
                 Err(e) => {

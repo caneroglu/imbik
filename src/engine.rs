@@ -173,7 +173,7 @@ impl EvolutionEngine {
 
         // Fill population with variations of seeds
         while self.population.len() < self.config.population_size {
-            let base = if self.population.len() % 2 == 0 {
+            let base = if self.population.len().is_multiple_of(2) {
                 sk.clone()
             } else {
                 dc.clone()
@@ -284,7 +284,7 @@ impl EvolutionEngine {
 
         // 1. Create pool of parents + mutant offspring (Elitist selection)
         let mut pool = self.population.clone();
-        pool.extend(self.population.iter().map(|parent| mutate(parent)));
+        pool.extend(self.population.iter().map(mutate));
 
         let stray_pf = self.config.stray_cap_pf;
         let preset_clone = preset.clone();
@@ -598,7 +598,7 @@ impl EvolutionEngine {
         let offspring: Vec<Circuit> = self
             .population
             .iter()
-            .map(|parent| mutate(parent))
+            .map(mutate)
             .collect();
 
         // 2. Parallel Evaluation via Rayon across all CPU cores

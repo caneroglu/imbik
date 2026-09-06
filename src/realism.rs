@@ -148,14 +148,13 @@ pub fn perturb_circuit(circuit: &Circuit, tolerance: f64) -> Circuit {
     let mut perturbed = circuit.clone();
 
     for comp in &mut perturbed.components {
-        if comp.comp_type == ComponentType::R || comp.comp_type == ComponentType::C {
-            if let Some(val) = parse_spice_value(&comp.value) {
+        if (comp.comp_type == ComponentType::R || comp.comp_type == ComponentType::C)
+            && let Some(val) = parse_spice_value(&comp.value) {
                 // Perturb with Gaussian noise bounded to ± 3*sigma
                 let factor = gaussian(1.0, tolerance).clamp(1.0 - 3.0 * tolerance, 1.0 + 3.0 * tolerance);
                 let new_val = val * factor;
                 comp.value = format_spice_value(new_val);
             }
-        }
     }
 
     perturbed
@@ -242,8 +241,8 @@ pub fn evaluate_monte_carlo(
                 &headers,
             );
 
-            if let Ok(sim) = run_simulation(&netlist, timeout) {
-                if let Some(ac) = sim.ac_response {
+            if let Ok(sim) = run_simulation(&netlist, timeout)
+                && let Some(ac) = sim.ac_response {
                     let run_peak = ac
                         .iter()
                         .map(|p| p.mag_db)
@@ -258,7 +257,6 @@ pub fn evaluate_monte_carlo(
                     }
                     return Some((run_peak, max_dev));
                 }
-            }
             None
         })
         .collect();
@@ -267,15 +265,13 @@ pub fn evaluate_monte_carlo(
     let mut max_deviation_db = 0.0;
     let mut runs_passed = 0;
 
-    for res in mc_results {
-        if let Some((run_peak, max_dev)) = res {
-            runs_passed += 1;
-            if run_peak < worst_case_peak_db {
-                worst_case_peak_db = run_peak;
-            }
-            if max_dev > max_deviation_db {
-                max_deviation_db = max_dev;
-            }
+    for (run_peak, max_dev) in mc_results.into_iter().flatten() {
+        runs_passed += 1;
+        if run_peak < worst_case_peak_db {
+            worst_case_peak_db = run_peak;
+        }
+        if max_dev > max_deviation_db {
+            max_deviation_db = max_dev;
         }
     }
 

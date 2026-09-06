@@ -115,7 +115,7 @@ pub fn generate_bom(circuit: &Circuit, descriptor: &BehaviorDescriptor) -> Strin
     doc.push_str("| :--- | :--- | :---: | :--- | :--- |\n");
 
     if opamps > 0 {
-        let dip8_chips = (opamps + 1) / 2;
+        let dip8_chips = opamps.div_ceil(2);
         doc.push_str(&format!(
             "| **IC** | **TL072** | {} chip(s) ({} op-amp section{}) | DIP-8 | Low-Noise Dual JFET Op-Amp |\n",
             dip8_chips,
@@ -183,7 +183,7 @@ pub fn generate_bom(circuit: &Circuit, descriptor: &BehaviorDescriptor) -> Strin
     }
     doc.push_str("```\n\n");
 
-    if opamps % 2 != 0 {
+    if !opamps.is_multiple_of(2) {
         doc.push_str("> [!IMPORTANT]\n");
         doc.push_str("> **Unused Op-Amp Section Protection**: Circuit uses 1 section of a dual TL072 DIP-8.\n");
         doc.push_str("> To prevent erratic oscillation, tie unused section: **Pin 5 (IN2+) to GND**, and connect **Pin 6 (IN2-) to Pin 7 (OUT2)** directly.\n\n");
@@ -218,15 +218,14 @@ pub fn generate_bom(circuit: &Circuit, descriptor: &BehaviorDescriptor) -> Strin
                     node_map.entry(comp.nodes[2]).or_default().push(format!("Q{}[Emitter] ({})", comp.id, comp.value));
                 }
             }
-            ComponentType::X => {
-                if comp.nodes.len() >= 5 {
+            ComponentType::X
+                if comp.nodes.len() >= 5 => {
                     node_map.entry(comp.nodes[0]).or_default().push(format!("X{}[IN+]", comp.id));
                     node_map.entry(comp.nodes[1]).or_default().push(format!("X{}[IN-]", comp.id));
                     node_map.entry(comp.nodes[2]).or_default().push(format!("X{}[VCC Pin 8]", comp.id));
                     node_map.entry(comp.nodes[3]).or_default().push(format!("X{}[VEE Pin 4]", comp.id));
                     node_map.entry(comp.nodes[4]).or_default().push(format!("X{}[OUT Pin 1]", comp.id));
                 }
-            }
             _ => {}
         }
     }
@@ -295,7 +294,7 @@ pub fn generate_protocol(circuit: &Circuit, descriptor: &BehaviorDescriptor) -> 
     if has_diodes {
         doc.push_str(&format!("{}. Inspect 1N4148 diodes: Ensure the black cathode stripe matches the BOM diagram.\n", step_num));
     }
-    doc.push_str("\n");
+    doc.push('\n');
 
     // Step 2
     doc.push_str("## Step 2: DC Power-On & Quiescent Bias Verification\n");
@@ -517,12 +516,11 @@ pub fn ingest_scope_data(
     let mut ref_vouts = Vec::new();
     for line in ref_content.lines().skip(1) {
         let parts: Vec<&str> = line.split(',').collect();
-        if parts.len() >= 5 {
-            if let (Ok(t), Ok(v)) = (parts[0].parse::<f64>(), parts[4].parse::<f64>()) {
+        if parts.len() >= 5
+            && let (Ok(t), Ok(v)) = (parts[0].parse::<f64>(), parts[4].parse::<f64>()) {
                 ref_times.push(t);
                 ref_vouts.push(v);
             }
-        }
     }
 
     if ref_times.is_empty() {
@@ -538,12 +536,11 @@ pub fn ingest_scope_data(
             continue;
         }
         let parts: Vec<&str> = trimmed.split([',', '\t', ' ']).filter(|s| !s.is_empty()).collect();
-        if parts.len() >= 2 {
-            if let (Ok(t), Ok(v)) = (parts[0].parse::<f64>(), parts[parts.len() - 1].parse::<f64>()) {
+        if parts.len() >= 2
+            && let (Ok(t), Ok(v)) = (parts[0].parse::<f64>(), parts[parts.len() - 1].parse::<f64>()) {
                 scope_times.push(t);
                 scope_vouts.push(v);
             }
-        }
     }
 
     if scope_vouts.len() < 10 {
