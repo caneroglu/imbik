@@ -1102,4 +1102,19 @@ mod tests {
         println!("=========================================================\n");
     }
 
+    #[test]
+    fn test_low_noise_preamp_mission_execution() {
+        let preset = Preset::load_or_builtin("low_noise_preamp").expect("load low_noise_preamp");
+        let mut config = EvolutionConfig::default();
+        config.population_size = 10;
+        config.max_generations = 2;
+        config.preset = Some(preset);
+        config.seed = Some(0x18d2b4bb78d2a4c8);
+
+        let mut engine = EvolutionEngine::new(config);
+        let running = Arc::new(AtomicBool::new(true));
+        let res = engine.run(running);
+        assert!(res.is_ok(), "Low-noise preamp mission execution should succeed");
+    }
 }
+

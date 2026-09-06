@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
 
 /// How a probe target evaluates fitness from the measured value
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -216,17 +215,28 @@ impl Preset {
 
     /// Load preset by name (e.g. "buffer") or file path ("presets/buffer.toml")
     pub fn load_or_builtin(name_or_path: &str) -> Result<Self, String> {
-        let path = Path::new(name_or_path);
-        if path.exists() {
-            let content = fs::read_to_string(path).map_err(|e| format!("Failed to read {}: {}", name_or_path, e))?;
-            return toml::from_str(&content).map_err(|e| format!("Failed to parse TOML preset: {}", e));
+        let mut candidates = Vec::new();
+        candidates.push(std::path::PathBuf::from(name_or_path));
+        candidates.push(std::path::PathBuf::from("presets").join(format!("{}.toml", name_or_path)));
+        candidates.push(std::path::PathBuf::from("../presets").join(format!("{}.toml", name_or_path)));
+        candidates.push(std::path::PathBuf::from("../../presets").join(format!("{}.toml", name_or_path)));
+
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(exe_dir) = exe_path.parent() {
+                candidates.push(exe_dir.join(name_or_path));
+                candidates.push(exe_dir.join("presets").join(format!("{}.toml", name_or_path)));
+                candidates.push(exe_dir.join("../presets").join(format!("{}.toml", name_or_path)));
+                candidates.push(exe_dir.join("../../presets").join(format!("{}.toml", name_or_path)));
+            }
         }
 
-        let default_dir_path = Path::new("presets").join(format!("{}.toml", name_or_path));
-        if default_dir_path.exists() {
-            let content = fs::read_to_string(&default_dir_path)
-                .map_err(|e| format!("Failed to read {:?}: {}", default_dir_path, e))?;
-            return toml::from_str(&content).map_err(|e| format!("Failed to parse TOML preset: {}", e));
+        for p in &candidates {
+            if p.exists() && p.is_file() {
+                let content = fs::read_to_string(p)
+                    .map_err(|e| format!("Failed to read {:?}: {}", p, e))?;
+                return toml::from_str(&content)
+                    .map_err(|e| format!("Failed to parse TOML preset {:?}: {}", p, e));
+            }
         }
 
         match name_or_path.to_lowercase().as_str() {
@@ -234,6 +244,168 @@ impl Preset {
             "low_noise_preamp" | "low_noise" | "preamp" => Ok(Self::low_noise_preamp_default()),
             other => Err(format!("Unknown preset: '{}'. Available built-in: 'buffer', 'low_noise_preamp'", other)),
         }
+    }
+
+    /// List all available built-in and discovered local presets
+    pub fn list_available() -> Vec<(String, String, usize)> {
+        let mut list = vec![
+            (
+                "buffer".to_string(),
+                "High-Z Input Buffer / Follower (Zin >= 500k, Gain ~ 1.0, Low Offset)".to_string(),
+                Self::buffer_default().probes.len(),
+            ),
+            (
+                "low_noise_preamp".to_string(),
+                "Ultra Low-Noise Discrete Preamplifier (Zin >= 50k, Gain >= 10, Noise < 3.5 nV/√Hz)".to_string(),
+                Self::low_noise_preamp_default().probes.len(),
+            ),
+        ];
+
+        // Search presets/ directories
+        let mut dirs = vec![
+            std::path::PathBuf::from("presets"),
+            std::path::PathBuf::from("../presets"),
+        ];
+        if let Ok(exe_path) = std::env::current_exe() {
+            if let Some(parent) = exe_path.parent() {
+                dirs.push(parent.join("presets"));
+            }
+        }
+
+        for d in dirs {
+            if let Ok(entries) = fs::read_dir(d) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("toml") {
+                        if let Ok(content) = fs::read_to_string(&path) {
+                            if let Ok(preset) = toml::from_str::<Preset>(&content) {
+                                if !list.iter().any(|(n, _, _)| n == &preset.name) {
+                                    list.push((preset.name, preset.description, preset.probes.len()));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        list
+    }
+
+    /// Return documented TOML configuration template for defining custom missions & probe targets
+    pub fn template_toml() -> &'static str {
+        concat!(
+            "# ==============================================================================\n",
+            "#   İmbik Mission Preset & Fitness Probe Definition Template\n",
+            "#   Save this file as 'presets/<mission_name>.toml'\n",
+            "#   Run with: imbik evolve --preset presets/<mission_name>.toml\n",
+            "# ==============================================================================\n\n",
+            "name = \"custom_audio_preamp\"\n",
+            "description = \"Ultra Low-Noise Discrete Microphone Preamplifier (Gain >= 20, Noise < 2.5 nV/√Hz)\"\n\n",
+            "# ------------------------------------------------------------------------------\n",
+            "# Feasibility Gate Constraints:\n",
+            "# Any candidate circuit violating these basic operating rules is rejected\n",
+            "# before wasting time on full AC/Noise frequency sweeps.\n",
+            "# ------------------------------------------------------------------------------\n",
+            "feasibility_max_dc = 2.0        # Max allowable DC offset at output (V)\n",
+            "feasibility_rail_margin = 0.5   # Headroom from power rails (V). Rejects railed/saturated nodes.\n",
+            "allow_opamps = false            # Allow Op-Amps? (false = purely discrete BJT/diodes/passives)\n\n",
+            "# ------------------------------------------------------------------------------\n",
+            "# Target Fitness Probes (Multi-Objective Optimization Vector):\n",
+            "# Each probe measures a physical property under specific test conditions.\n",
+            "#\n",
+            "# Available probe_type:\n",
+            "#   - \"Gain\"       : AC voltage gain magnitude (|Vout / Vin|)\n",
+            "#   - \"Noise\"      : Input-referred noise density in nV/√Hz at target frequency\n",
+            "#   - \"NoiseFig\"   : Noise figure in dB (referenced to r_source Johnson noise)\n",
+            "#   - \"NoiseTotal\" : Integrated audio-band (20Hz - 20kHz) total noise in µV RMS\n",
+            "#   - \"Zin\"        : Input impedance in Ohms (Ω)\n",
+            "#   - \"Zout\"       : Output impedance in Ohms (Ω)\n",
+            "#   - \"DcOffset\"   : Output DC offset voltage (|Vout_dc|) in Volts\n",
+            "#   - \"Bom\"        : Total component count (penalizes excessive parts)\n",
+            "#\n",
+            "# Available kind (Scoring Functions):\n",
+            "#   - \"Closeness\"  : Score = 1.0 when value == 'want'. Linearly drops to 0.0 at 'soft'.\n",
+            "#   - \"Greater\"    : Score = 1.0 when value >= 'want'. Drops (logarithmic for Zin/gain) to 0.0 at 'soft'.\n",
+            "#   - \"Lesser\"     : Score = 1.0 when value <= 'want'. Drops (logarithmic for noise) to 0.0 at 'soft'.\n",
+            "#\n",
+            "# Attributes:\n",
+            "#   - want        : Ideal target value\n",
+            "#   - soft        : Unacceptable / dropoff threshold value\n",
+            "#   - weight      : Relative importance in multi-objective fitness (e.g. 1.0 - 5.0)\n",
+            "#   - is_required : If true, candidate fails immediately (fitness = 0) if score <= 0.0\n",
+            "# ------------------------------------------------------------------------------\n\n",
+            "# Probe 1: Target AC Voltage Gain of 20x (+26 dB) at 1 kHz\n",
+            "[[probes]]\n",
+            "name = \"Gain@1kHz\"\n",
+            "probe_type = \"Gain\"\n",
+            "kind = \"Greater\"\n",
+            "want = 20.0                     # Ideal gain: 20x\n",
+            "soft = 1.0                      # Below 1x gain scores 0.0\n",
+            "weight = 4.0                    # High priority\n",
+            "is_required = true              # Hard requirement: must amplify!\n",
+            "[probes.condition]\n",
+            "freq = 1000.0                   # Test frequency: 1 kHz\n",
+            "vin = 0.005                     # Input signal: 5 mV AC\n",
+            "r_load = 10000.0                # Load resistance: 10 kΩ\n",
+            "r_source = 200.0                # Source impedance: 200 Ω\n\n",
+            "# Probe 2: Input-Referred Spot Noise Voltage at 1 kHz\n",
+            "[[probes]]\n",
+            "name = \"Noise@1kHz\"\n",
+            "probe_type = \"Noise\"\n",
+            "kind = \"Lesser\"\n",
+            "want = 2.0                      # Ideal target: 2.0 nV/√Hz\n",
+            "soft = 25.0                     # Above 25 nV/√Hz scores 0.0\n",
+            "weight = 5.0                    # Highest optimization priority\n",
+            "is_required = false\n",
+            "[probes.condition]\n",
+            "freq = 1000.0\n",
+            "vin = 0.0                       # 0V input for pure noise spectrum measurement\n",
+            "r_load = 10000.0\n",
+            "r_source = 200.0\n\n",
+            "# Probe 3: Input Impedance at 1 kHz\n",
+            "[[probes]]\n",
+            "name = \"Zin@1kHz\"\n",
+            "probe_type = \"Zin\"\n",
+            "kind = \"Greater\"\n",
+            "want = 50000.0                  # Want Zin >= 50 kΩ (bridging impedance for 200Ω mic)\n",
+            "soft = 2000.0                   # Below 2 kΩ severely loads source\n",
+            "weight = 2.0\n",
+            "is_required = false\n",
+            "[probes.condition]\n",
+            "freq = 1000.0\n",
+            "vin = 0.005\n",
+            "r_load = 10000.0\n",
+            "r_source = 200.0\n\n",
+            "# Probe 4: DC Output Offset (Zero-drop DC centering)\n",
+            "[[probes]]\n",
+            "name = \"DcOffset\"\n",
+            "probe_type = \"DcOffset\"\n",
+            "kind = \"Lesser\"\n",
+            "want = 0.05                     # Centered within 50 mV\n",
+            "soft = 1.50                     # Above 1.5V offset is unacceptable\n",
+            "weight = 1.5\n",
+            "is_required = true\n",
+            "[probes.condition]\n",
+            "freq = 1000.0\n",
+            "vin = 0.0\n",
+            "r_load = 10000.0\n",
+            "r_source = 200.0\n\n",
+            "# Probe 5: Parsimony / Bill of Materials (BOM) Count\n",
+            "[[probes]]\n",
+            "name = \"BOM_Count\"\n",
+            "probe_type = \"Bom\"\n",
+            "kind = \"Lesser\"\n",
+            "want = 4.0                      # Reward elegant 4-component circuits\n",
+            "soft = 10.0                     # Penalize bloated 10+ component circuits\n",
+            "weight = 1.0\n",
+            "is_required = false\n",
+            "[probes.condition]\n",
+            "freq = 1000.0\n",
+            "vin = 0.0\n",
+            "r_load = 10000.0\n",
+            "r_source = 200.0\n"
+        )
     }
 
     /// Standard Low-Noise Preamplifier preset (Discrete BJT, Zin >= 50k, Gain >= 10, Noise <= 3.5 nV/√Hz @ 1kHz)
@@ -256,8 +428,8 @@ impl Preset {
                     },
                     kind: ProbeKind::Greater,
                     want: 10.0,
-                    soft: 1.0,
-                    weight: 2.5,
+                    soft: 0.1,
+                    weight: 3.5,
                     is_required: true,
                 },
                 ProbeTarget {
@@ -271,9 +443,9 @@ impl Preset {
                     },
                     kind: ProbeKind::Lesser,
                     want: 3.5,
-                    soft: 25.0,
+                    soft: 100.0,
                     weight: 4.0,
-                    is_required: true,
+                    is_required: false,
                 },
                 ProbeTarget {
                     name: "Zin@1kHz".to_string(),
@@ -293,7 +465,12 @@ impl Preset {
                 ProbeTarget {
                     name: "DcOffset".to_string(),
                     probe_type: ProbeType::DcOffset,
-                    condition: TestCondition::default(),
+                    condition: TestCondition {
+                        freq: 1000.0,
+                        vin: 0.0,
+                        r_load: 10000.0,
+                        r_source: 600.0,
+                    },
                     kind: ProbeKind::Lesser,
                     want: 0.05,
                     soft: 1.50,
@@ -303,7 +480,12 @@ impl Preset {
                 ProbeTarget {
                     name: "BOM_Count".to_string(),
                     probe_type: ProbeType::Bom,
-                    condition: TestCondition::default(),
+                    condition: TestCondition {
+                        freq: 1000.0,
+                        vin: 0.0,
+                        r_load: 10000.0,
+                        r_source: 600.0,
+                    },
                     kind: ProbeKind::Lesser,
                     want: 4.0,
                     soft: 12.0,

@@ -1,0 +1,56 @@
+name = "MCP6002"
+kind = "OpAmp"
+description = "Microchip 1MHz Low-Power Rail-to-Rail Dual CMOS Op-Amp"
+pin_order = [
+    1,
+    2,
+    3,
+    4,
+    5,
+]
+spice_text = """
+.subckt MCP6002 1 2 3 4 5
+  * Synthesized Precision JFET/CMOS Op-Amp Macromodel (GBW=1.0MHz, Vsat=0.05V)
+  C1 11 12 1.5000e-12
+  C2 6 7 1.5915e-10
+  DC 5 53 DX
+  DE 54 5 DX
+  DLP 90 91 DX
+  DLN 92 90 DX
+  DP 4 3 DX
+  EGND 99 0 POLY(2) (3,0) (4,0) 0 .5 .5
+  FB 7 99 POLY(5) VB VC VE VLP VLN 0 5.0e6 -5e6 5E6 5E6 -5E6
+  GA 6 0 11 12 1.0000e-3
+  GCM 0 6 10 99 1.0e-9
+  ISS 3 10 DC 5.0e-5
+  HLIM 90 0 VLIM 1K
+  J1 11 2 10 JX
+  J2 12 1 10 JX
+  R2 6 9 100.0E3
+  RD1 4 11 2.0e3
+  RD2 4 12 2.0e3
+  RO1 8 5 40
+  RO2 7 99 40
+  RP 3 4 2.5e3
+  VB 9 0 DC 0
+  VC 3 53 DC 0.050
+  VE 54 4 DC 0.050
+  VLIM 7 8 DC 0
+  VLP 91 0 DC 25
+  VLN 0 92 DC 25
+  .model DX D(IS=800.0E-18)
+  .model JX PJF(BETA=1.5e-3 VTO=-1.0)
+.ends
+"""
+is_builtin = false
+
+[specs]
+input_stage = "Jfet"
+zin_1k = 999991102000.0
+noise_spot_1k = 13.3237154
+rail_margin_v = 0.00012000000000078614
+is_rrio = true
+gbw_mhz = 0.831763771
+slew_rate_v_us = 0.6
+v_supply_min = 1.8
+v_supply_max = 6.0

@@ -5,13 +5,15 @@ pub mod engine;
 pub mod fitness;
 pub mod loot;
 pub mod mutate;
+pub mod parts;
 pub mod preset;
 pub mod realism;
 pub mod spice;
 
 use clap::{Parser, Subcommand};
 use engine::{EvolutionConfig, EvolutionEngine};
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -20,7 +22,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
     name = "imbik",
     version = "0.1.0",
     about = "Autonomous Analog Circuit Hunter Engine",
-    after_help = "Examples:\n  imbik list\n  imbik show best\n  imbik draw 0 circuit.svg\n  imbik bench 0\n  imbik evolve --preset buffer 50\n  imbik ingest scope.csv 0"
+    after_help = "Examples:\n  imbik list\n  imbik part list\n  imbik part test TL072\n  imbik part add OPA1612.LIB\n  imbik show best\n  imbik draw 0 circuit.svg\n  imbik bench 0\n  imbik evolve --preset buffer 50\n  imbik ingest scope.csv 0"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -33,6 +35,18 @@ enum Commands {
     List {
         /// Optional path to checkpoint JSON file
         checkpoint: Option<PathBuf>,
+    },
+
+    /// Manage & inspect analog component catalog, vendor SPICE models, and benchmarks
+    Part {
+        #[command(subcommand)]
+        action: PartCommands,
+    },
+
+    /// Manage & inspect mission presets and fitness probes
+    Preset {
+        #[command(subcommand)]
+        action: PresetCommands,
     },
 
     /// Inspect details, netlist & pin map of a circuit
@@ -104,18 +118,72 @@ enum Commands {
     },
 }
 
+#[derive(Subcommand, Debug)]
+enum PartCommands {
+    /// List all registered parts and their physical characteristics
+    List {
+        /// Optional kind filter: 'opamp', 'bjt', 'diode'
+        #[arg(short, long)]
+        kind: Option<String>,
+    },
+    /// Inspect details and SPICE macromodel of a component
+    Show {
+        /// Part name (e.g. 'TL072', 'NE5532', '2N3904')
+        name: String,
+    },
+    /// Run automated 50ms SPICE physical characterization bench (Zin, noise, rail margin, GBW)
+    Test {
+        /// Part name (e.g. 'TL072', 'NE5532')
+        name: String,
+    },
+    /// Ingest a vendor SPICE model (.lib, .sub, .mod, .cir) OR component TOML into catalog
+    Add {
+        /// Path to vendor SPICE or component TOML file
+        file: PathBuf,
+    },
+    /// Print documented TOML configuration template for defining custom components
+    Template {
+        /// Component kind: 'opamp', 'bjt', or 'diode' (default: 'opamp')
+        #[arg(short, long, default_value = "opamp")]
+        kind: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum PresetCommands {
+    /// List all available mission presets
+    List,
+    /// Inspect details and probe specifications of a mission preset
+    Show {
+        /// Preset name (e.g. 'buffer', 'low_noise_preamp') or path to TOML
+        name: String,
+    },
+    /// Print documented TOML configuration template for custom missions & probe targets
+    Template,
+}
+
 fn find_default_checkpoint() -> PathBuf {
-    let candidates = [
-        "checkpoints/checkpoint_final.json",
-        "target/test_checkpoints/checkpoint_final.json",
-        "checkpoints/checkpoint_gen_50.json",
-        "target/test_checkpoints/checkpoint_gen_50.json",
+    let mut candidates = vec![
+        PathBuf::from("checkpoints/checkpoint_final.json"),
+        PathBuf::from("../checkpoints/checkpoint_final.json"),
+        PathBuf::from("../../checkpoints/checkpoint_final.json"),
+        PathBuf::from("target/test_checkpoints/checkpoint_final.json"),
+        PathBuf::from("checkpoints/checkpoint_gen_50.json"),
+        PathBuf::from("../checkpoints/checkpoint_gen_50.json"),
+        PathBuf::from("target/test_checkpoints/checkpoint_gen_50.json"),
     ];
 
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join("checkpoints/checkpoint_final.json"));
+            candidates.push(exe_dir.join("../checkpoints/checkpoint_final.json"));
+            candidates.push(exe_dir.join("../../checkpoints/checkpoint_final.json"));
+        }
+    }
+
     for c in &candidates {
-        let p = Path::new(c);
-        if p.exists() {
-            return p.to_path_buf();
+        if c.exists() {
+            return c.clone();
         }
     }
 
@@ -160,11 +228,19 @@ fn parse_seed_str(s: &str) -> Result<u64, String> {
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
-    println!("============================================================");
-    println!("  İmbik v0.1.0 - Autonomous Analog Circuit Hunter Engine   ");
-    println!("============================================================");
-
     let cli = Cli::parse();
+
+    let is_template = matches!(
+        cli.command,
+        Some(Commands::Part { action: PartCommands::Template { .. } })
+            | Some(Commands::Preset { action: PresetCommands::Template })
+    );
+
+    if !is_template {
+        println!("============================================================");
+        println!("  İmbik v0.1.0 - Autonomous Analog Circuit Hunter Engine   ");
+        println!("============================================================");
+    }
 
     let command = match cli.command {
         Some(cmd) => cmd,
@@ -199,6 +275,330 @@ fn main() {
                 std::process::exit(1);
             }
         }
+
+        Commands::Part { action } => {
+            let mut catalog = parts::PartCatalog::load_with_overrides();
+
+            match action {
+                PartCommands::List { kind } => {
+                    println!("\n========================================================================================================================");
+                    println!("  🧩 İMBİK ANALOG COMPONENT CATALOG (Total: {})", catalog.parts.len());
+                    println!("========================================================================================================================");
+                    println!(
+                        "{:<10} | {:<10} | {:<22} | {:<12} | {:<12} | {:<12} | {:<10} | {:<14}",
+                        "NAME", "KIND", "INPUT STAGE", "NOISE(1k)", "ZIN(1k)", "RRIO / Vsat", "GBW (MHz)", "SUPPLY LIMITS"
+                    );
+                    println!("{:-<120}", "");
+
+                    let mut all_parts: Vec<_> = catalog.parts.values().collect();
+                    all_parts.sort_by_key(|p| (p.kind as usize, p.name.clone()));
+
+                    for p in all_parts {
+                        if let Some(ref k) = kind {
+                            let k_lower = k.to_lowercase();
+                            let match_kind = match p.kind {
+                                parts::PartKind::OpAmp => k_lower.contains("op"),
+                                parts::PartKind::BjtNpn | parts::PartKind::BjtPnp => {
+                                    k_lower.contains("bjt") || k_lower.contains("transistor")
+                                }
+                                parts::PartKind::Diode => k_lower.contains("diode"),
+                                _ => false,
+                            };
+                            if !match_kind {
+                                continue;
+                            }
+                        }
+
+                        let stage_str = p.specs.input_stage.map(|s| s.as_str()).unwrap_or("-");
+                        let noise_str = p
+                            .specs
+                            .noise_spot_1k
+                            .map(|n| format!("{:.1} nV/√Hz", n))
+                            .unwrap_or_else(|| "-".to_string());
+                        let zin_str = p
+                            .specs
+                            .zin_1k
+                            .map(|z| {
+                                if z >= 1.0e12 {
+                                    format!("{:.0} TΩ", z / 1.0e12)
+                                } else if z >= 1.0e9 {
+                                    format!("{:.0} GΩ", z / 1.0e9)
+                                } else if z >= 1.0e6 {
+                                    format!("{:.1} MΩ", z / 1.0e6)
+                                } else if z >= 1.0e3 {
+                                    format!("{:.0} kΩ", z / 1.0e3)
+                                } else {
+                                    format!("{:.0} Ω", z)
+                                }
+                            })
+                            .unwrap_or_else(|| "-".to_string());
+
+                        let rrio_str = if p.specs.is_rrio == Some(true) {
+                            "★ RRIO".to_string()
+                        } else if let Some(margin) = p.specs.rail_margin_v {
+                            format!("{:.2} V drop", margin)
+                        } else {
+                            "-".to_string()
+                        };
+
+                        let gbw_str = p
+                            .specs
+                            .gbw_mhz
+                            .map(|g| format!("{:.1} MHz", g))
+                            .unwrap_or_else(|| "-".to_string());
+                        let supply_str = match (p.specs.v_supply_min, p.specs.v_supply_max) {
+                            (Some(min), Some(max)) => format!("{:.0}V - {:.0}V", min, max),
+                            (None, Some(max)) => format!("max {:.0}V", max),
+                            _ => "-".to_string(),
+                        };
+
+                        println!(
+                            "{:<10} | {:<10} | {:<22} | {:<12} | {:<12} | {:<12} | {:<10} | {:<14}",
+                            p.name,
+                            p.kind.as_str(),
+                            stage_str,
+                            noise_str,
+                            zin_str,
+                            rrio_str,
+                            gbw_str,
+                            supply_str
+                        );
+                    }
+                    println!("{:-<120}", "");
+                    println!("Tips: Use `imbik part show <name>` to inspect SPICE model or `imbik part test <name>` to benchmark.\n");
+                }
+
+                PartCommands::Show { name } => {
+                    let part = match catalog.get(&name) {
+                        Some(p) => p,
+                        None => {
+                            eprintln!("Error: Component '{}' not found in catalog.", name);
+                            std::process::exit(1);
+                        }
+                    };
+
+                    println!("\n=================================================================================");
+                    println!("  🔍 COMPONENT INSPECTOR: {}", part.name);
+                    println!("=================================================================================");
+                    println!("- **Name**:          {}", part.name);
+                    println!("- **Kind**:          {}", part.kind.as_str());
+                    println!("- **Description**:   {}", part.description);
+                    println!(
+                        "- **Origin**:        {}",
+                        if part.is_builtin {
+                            "Built-in System Library"
+                        } else {
+                            "Custom / User Imported"
+                        }
+                    );
+                    println!("- **Pin Mapping**:   {:?}", part.pin_order);
+                    if let Some(st) = part.specs.input_stage {
+                        println!("- **Input Stage**:   {}", st.as_str());
+                    }
+                    if let Some(n) = part.specs.noise_spot_1k {
+                        println!("- **Voltage Noise**: {:.2} nV/√Hz @ 1kHz", n);
+                    }
+                    if let Some(fc) = part.specs.noise_corner_freq {
+                        println!("- **1/f Corner**:    {:.1} Hz", fc);
+                    }
+                    if let Some(z) = part.specs.zin_1k {
+                        println!("- **Input Impedance**: {:.0} Ω", z);
+                    }
+                    if let Some(g) = part.specs.gbw_mhz {
+                        println!("- **Unity GBW**:     {:.2} MHz", g);
+                    }
+                    if let Some(r) = part.specs.rail_margin_v {
+                        println!(
+                            "- **Rail Margin**:   {:.2} V (RRIO: {:?})",
+                            r,
+                            part.specs.is_rrio.unwrap_or(false)
+                        );
+                    }
+
+                    println!("\n## SPICE Model Definition");
+                    println!("```spice\n{}\n```", part.spice_text.trim());
+                    println!("=================================================================================\n");
+                }
+
+                PartCommands::Test { name } => {
+                    println!("\n=================================================================================");
+                    println!("  🔬 LIVE SPICE COMPONENT BENCHMARK: {}", name);
+                    println!("=================================================================================");
+                    println!("Running automated 50ms SPICE physical characterization bench on ngspice...");
+
+                    let part = match catalog.get(&name) {
+                        Some(p) => p,
+                        None => {
+                            eprintln!("Error: Component '{}' not found in catalog.", name);
+                            std::process::exit(1);
+                        }
+                    };
+
+                    if part.kind == parts::PartKind::OpAmp {
+                        match catalog.benchmark_opamp(&name) {
+                            Ok(specs) => {
+                                println!("\n✅ SPICE Benchmark Completed Successfully!");
+                                println!(
+                                    "  • Input Stage Type:     {}",
+                                    specs.input_stage.map(|s| s.as_str()).unwrap_or("Unknown")
+                                );
+                                println!(
+                                    "  • Input Impedance @1k:  {:.1} MΩ",
+                                    specs.zin_1k.unwrap_or(0.0) / 1.0e6
+                                );
+                                println!(
+                                    "  • Voltage Noise @1k:    {:.2} nV/√Hz",
+                                    specs.noise_spot_1k.unwrap_or(0.0)
+                                );
+                                if let Some(fc) = specs.noise_corner_freq {
+                                    println!("  • 1/f Flicker Corner:   {:.1} Hz", fc);
+                                }
+                                println!(
+                                    "  • Rail Saturation Drop: {:.2} V (RRIO: {})",
+                                    specs.rail_margin_v.unwrap_or(0.0),
+                                    if specs.is_rrio == Some(true) {
+                                        "YES (★ RRIO)"
+                                    } else {
+                                        "NO (Standard Drop)"
+                                    }
+                                );
+                                println!(
+                                    "  • Unity Gain Bandwidth: {:.2} MHz",
+                                    specs.gbw_mhz.unwrap_or(0.0)
+                                );
+                                println!("=================================================================================\n");
+                            }
+                            Err(e) => {
+                                eprintln!("Benchmark failed: {}", e);
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        println!(
+                            "Component '{}' is a {}. Direct model text is valid.",
+                            part.name,
+                            part.kind.as_str()
+                        );
+                    }
+                }
+
+                PartCommands::Add { file } => {
+                    if !file.exists() {
+                        eprintln!("Error: File not found: {:?}", file);
+                        std::process::exit(1);
+                    }
+
+                    println!("\n=================================================================================");
+                    println!("  📥 IMPORTING VENDOR SPICE MODEL: {:?}", file);
+                    println!("=================================================================================");
+
+                    match catalog.ingest_vendor_file(&file) {
+                        Ok(names) => {
+                            println!("Extracted {} model(s): {:?}", names.len(), names);
+                            for name in &names {
+                                if let Some(part) = catalog.get(name) {
+                                    println!("  • Ingested '{}' as {}", part.name, part.kind.as_str());
+                                    if part.kind == parts::PartKind::OpAmp {
+                                        print!("    Benchmarking '{}' in SPICE... ", part.name);
+                                        match catalog.benchmark_opamp(name) {
+                                            Ok(measured_specs) => {
+                                                println!(
+                                                    "DONE! (Noise: {:.2} nV/√Hz, Zin: {:.1} MΩ, GBW: {:.1} MHz)",
+                                                    measured_specs.noise_spot_1k.unwrap_or(0.0),
+                                                    measured_specs.zin_1k.unwrap_or(0.0) / 1.0e6,
+                                                    measured_specs.gbw_mhz.unwrap_or(0.0)
+                                                );
+                                                // Save to parts/{name}.toml
+                                                let mut updated_part = part.clone();
+                                                updated_part.specs = measured_specs;
+                                                let parts_dir = PathBuf::from("parts");
+                                                let _ = fs::create_dir_all(&parts_dir);
+                                                let out_path = parts_dir.join(format!("{}.toml", name.to_lowercase()));
+                                                if let Ok(toml_str) = toml::to_string_pretty(&updated_part) {
+                                                    let _ = fs::write(&out_path, toml_str);
+                                                    println!("    Saved part definition to {:?}", out_path);
+                                                }
+                                            }
+                                            Err(e) => {
+                                                println!("Warning: Benchmark failed ({}), registering raw model.", e);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            println!("\n🎉 Successfully imported into İmbik component catalog!");
+                        }
+                        Err(e) => {
+                            eprintln!("Error ingesting SPICE file: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+
+                PartCommands::Template { kind } => {
+                    let toml_str = parts::PartCatalog::template_toml(&kind);
+                    print!("{}", toml_str);
+                }
+            }
+        }
+
+        Commands::Preset { action } => match action {
+            PresetCommands::List => {
+                let presets = preset::Preset::list_available();
+                println!("\n========================================================================================================");
+                println!("  🎯 İMBİK MISSION PRESETS & TARGET CATALOG (Total: {})", presets.len());
+                println!("========================================================================================================");
+                println!("{:<20} | {:<8} | {:<60}", "NAME", "PROBES", "DESCRIPTION");
+                println!("{:-<104}", "");
+                for (name, desc, probe_cnt) in presets {
+                    println!("{:<20} | {:<8} | {:<60}", name, probe_cnt, desc);
+                }
+                println!("{:-<104}", "");
+                println!("Tips: Use `imbik preset show <name>` to inspect or `imbik preset template` for TOML format.\n");
+            }
+            PresetCommands::Show { name } => {
+                let p = match preset::Preset::load_or_builtin(&name) {
+                    Ok(pr) => pr,
+                    Err(e) => {
+                        eprintln!("Error loading preset '{}': {}", name, e);
+                        std::process::exit(1);
+                    }
+                };
+
+                println!("\n=================================================================================");
+                println!("  🎯 MISSION PRESET: {}", p.name);
+                println!("=================================================================================");
+                println!("- Description:             {}", p.description);
+                println!("- Checksum:                {}", p.checksum());
+                println!("- Feasibility Max DC:      {:.2} V", p.feasibility_max_dc);
+                println!("- Feasibility Rail Margin: {:.2} V", p.feasibility_rail_margin);
+                println!("- Allow Op-Amps:           {}", p.allow_opamps);
+                println!("\nTarget Fitness Probes (Total: {}):", p.probes.len());
+                for (i, pr) in p.probes.iter().enumerate() {
+                    let req_str = if pr.is_required { " [REQUIRED]" } else { "" };
+                    println!(
+                        "  {}. {:<14} : {:?} {:?} want={:.2}, soft={:.2}, wt={:.1}{}",
+                        i + 1,
+                        pr.name,
+                        pr.probe_type,
+                        pr.kind,
+                        pr.want,
+                        pr.soft,
+                        pr.weight,
+                        req_str
+                    );
+                    println!(
+                        "     Condition: f={:.0}Hz, Vin={:.3}V, Rload={:.0}Ω, Rsrc={:.0}Ω",
+                        pr.condition.freq, pr.condition.vin, pr.condition.r_load, pr.condition.r_source
+                    );
+                }
+                println!("=================================================================================\n");
+            }
+            PresetCommands::Template => {
+                let toml_str = preset::Preset::template_toml();
+                print!("{}", toml_str);
+            }
+        },
 
         Commands::Show { id, checkpoint } => {
             let cp_path = checkpoint.unwrap_or_else(find_default_checkpoint);

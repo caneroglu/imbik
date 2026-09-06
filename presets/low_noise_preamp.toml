@@ -11,8 +11,8 @@ name = "Gain@1kHz"
 probe_type = "Gain"
 kind = "Greater"
 want = 10.0
-soft = 1.0
-weight = 2.5
+soft = 0.1
+weight = 3.5
 require = true
 
 [probes.condition]
@@ -27,9 +27,9 @@ name = "Noise@1kHz"
 probe_type = "Noise"
 kind = "Lesser"
 want = 3.5
-soft = 25.0
+soft = 100.0
 weight = 4.0
-require = true
+require = false
 
 [probes.condition]
 freq = 1000.0

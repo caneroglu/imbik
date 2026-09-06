@@ -7,21 +7,20 @@ pub const NODE_OUT: usize = 2;
 pub const NODE_VCC: usize = 3;
 pub const NODE_VEE: usize = 4;
 
+use std::sync::LazyLock;
+
+static SPICE_HEADERS_CACHE: LazyLock<String> = LazyLock::new(|| {
+    crate::parts::default_spice_headers()
+});
+
 /// The single canonical SPICE model/include preamble shared by EVERY netlist
 /// generator in the crate.
 ///
-/// This preamble used to be copy-pasted into four separate generators, and two of
-/// those copies silently omitted the BJT models. That made `to_tran_netlist` and the
-/// entire Monte Carlo path fail on any circuit containing a transistor, which forced
-/// `mc_dev_db` to `None` and capped every discrete discovery at COMMON rarity.
-/// Never inline these lines again - always call this function.
+/// Fully dynamic & self-contained: delegates to `parts::PartCatalog` which contains
+/// all built-in models (TL072, NE5532, LM358, OPA2134, 2N3904, 2N3906, BC547B, BC557B, 1N4148, BAT54, 1N5819)
+/// plus any custom user models in `parts/`.
 pub fn standard_spice_headers() -> &'static str {
-    concat!(
-        ".include \"tl072.sub\"\n",
-        ".model 1N4148 D(is=2.52n rs=0.568 n=1.752 cjo=4p m=0.4 tt=20n)\n",
-        ".model 2N3904 NPN(Is=6.734f Xti=3 Eg=1.11 Vaf=74.03 Bf=416.4 Ne=1.259 Ise=6.734f Ikf=66.78m Xtb=1.5 Br=.7371 Nc=2 Isc=0 Ikr=0 Rc=1 Cjc=3.638p Mjc=.3085 Vjc=.75 Fc=.5 Cje=4.493p Mje=.2593 Vje=.75 Tr=239.5n Tf=301.2p Itf=.4 Vtf=4 Xtf=2 Rb=10 Kf=1.2e-16 Af=1.1)\n",
-        ".model 2N3906 PNP(Is=1.41f Xti=3 Eg=1.11 Vaf=18.7 Bf=180.7 Ne=1.5 Ise=0 Ikf=80m Xtb=1.5 Br=4.977 Nc=2 Isc=0 Ikr=0 Rc=2 Cjc=4.5p Mjc=.3 Vjc=.75 Fc=.5 Cje=5p Mje=.3 Vje=.75 Tr=50n Tf=300p Itf=.4 Vtf=4 Xtf=2 Rb=10 Kf=1.5e-16 Af=1.1)\n",
-    )
+    &SPICE_HEADERS_CACHE
 }
 
 /// Permitted component types strictly white-listed.
@@ -420,10 +419,10 @@ mod tests {
         ];
 
         for (name, netlist) in &generated {
-            for required in [".model 2N3904", ".model 2N3906", ".model 1N4148", "tl072.sub"] {
+            for required in [".model 2N3904", ".model 2N3906", ".model 1N4148", ".subckt TL072"] {
                 assert!(
                     netlist.contains(required),
-                    "netlist generator `{}` does not declare `{}`; a circuit using that                      device would fail in ngspice with an unknown-model error",
+                    "netlist generator `{}` does not declare `{}`; a circuit using that device would fail in ngspice with an unknown-model error",
                     name,
                     required
                 );

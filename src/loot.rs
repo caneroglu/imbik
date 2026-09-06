@@ -541,6 +541,27 @@ pub fn export_bench_from_checkpoint(
     Ok(report.output_dir)
 }
 
+fn find_schematic_script() -> Option<PathBuf> {
+    let mut candidates = vec![
+        PathBuf::from("scripts/schematic.py"),
+        PathBuf::from("../scripts/schematic.py"),
+        PathBuf::from("../../scripts/schematic.py"),
+    ];
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            candidates.push(exe_dir.join("scripts/schematic.py"));
+            candidates.push(exe_dir.join("../scripts/schematic.py"));
+            candidates.push(exe_dir.join("../../scripts/schematic.py"));
+        }
+    }
+    for c in candidates {
+        if c.exists() && c.is_file() {
+            return Some(c);
+        }
+    }
+    None
+}
+
 /// Execute schematic rendering using multi-tier fallback:
 /// 1. `uv run --with schemdraw python scripts/schematic.py ...` (via UV_PATH, IMBIK_UV, or PATH)
 /// 2. Direct `python scripts/schematic.py ...`
@@ -555,6 +576,9 @@ pub fn render_schematic_svg(
         let _ = fs::create_dir_all(parent);
     }
 
+    let script_path = find_schematic_script().unwrap_or_else(|| PathBuf::from("scripts/schematic.py"));
+    let script_str = script_path.to_str().unwrap_or("scripts/schematic.py");
+
     let cp_str = checkpoint_path.to_str().unwrap_or("");
     let id_str = circuit_id.to_string();
     let out_str = target_svg.to_str().unwrap_or("");
@@ -568,7 +592,7 @@ pub fn render_schematic_svg(
             "--with",
             "schemdraw",
             "python",
-            "scripts/schematic.py",
+            script_str,
             cp_str,
             &id_str,
             out_str,
@@ -593,7 +617,7 @@ pub fn render_schematic_svg(
         if *py_cmd == "py" {
             cmd.arg("-3");
         }
-        cmd.args(["scripts/schematic.py", cp_str, &id_str, out_str]);
+        cmd.args([script_str, cp_str, &id_str, out_str]);
 
         if let Ok(st) = cmd.status()
             && st.success() && target_svg.exists() {
@@ -603,11 +627,11 @@ pub fn render_schematic_svg(
     }
 
     Err(format!(
-        "Failed to render schematic for circuit #{}. Neither uv ('{}') nor system Python with 'schemdraw' could execute 'scripts/schematic.py'.\n\
+        "Failed to render schematic for circuit #{}. Neither uv ('{}') nor system Python with 'schemdraw' could execute '{}'.\n\
          To enable schematic rendering:\n\
            • Install uv (recommended): https://astral.sh/uv (or 'cargo install uv')\n\
            • OR install schemdraw: 'pip install schemdraw'",
-        circuit_id, uv_bin
+        circuit_id, uv_bin, script_str
     ))
 }
 

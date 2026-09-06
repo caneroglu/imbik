@@ -206,18 +206,33 @@ pub fn run_simulation(netlist: &str, timeout: Duration) -> Result<SimulationResu
 
     fs::write(&circuit_path, netlist)?;
 
-    // Copy any models from ./models if directory exists
-    let models_dir = Path::new("models");
-    if models_dir.exists() && models_dir.is_dir()
-        && let Ok(entries) = fs::read_dir(models_dir) {
-            for entry in entries.flatten() {
-                let file_path = entry.path();
-                if file_path.is_file()
-                    && let Some(file_name) = file_path.file_name() {
-                        let _ = fs::copy(&file_path, temp_dir.path().join(file_name));
+    // Copy any custom models from models/ directories if they exist
+    let mut model_dirs = vec![
+        std::path::PathBuf::from("models"),
+        std::path::PathBuf::from("../models"),
+        std::path::PathBuf::from("../../models"),
+    ];
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            model_dirs.push(exe_dir.join("models"));
+            model_dirs.push(exe_dir.join("../models"));
+            model_dirs.push(exe_dir.join("../../models"));
+        }
+    }
+    for mdir in model_dirs {
+        if mdir.exists() && mdir.is_dir() {
+            if let Ok(entries) = fs::read_dir(&mdir) {
+                for entry in entries.flatten() {
+                    let file_path = entry.path();
+                    if file_path.is_file() {
+                        if let Some(file_name) = file_path.file_name() {
+                            let _ = fs::copy(&file_path, temp_dir.path().join(file_name));
+                        }
                     }
+                }
             }
         }
+    }
 
     // Acquire concurrency permit before spawning ngspice process
     let _permit = SpicePermit::acquire();
